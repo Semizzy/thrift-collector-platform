@@ -38,6 +38,7 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [active, setActive] = useState('Overview');
   const [searchOpen, setSearchOpen] = useState(false);
+  const [canReviewDeposits, setCanReviewDeposits] = useState(false);
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
@@ -57,7 +58,7 @@ export default function App() {
     setMenuOpen(false);
   }
 
-  const items = page === 'admin' ? adminNav : userNav;
+  const items = page === 'admin' ? adminNav : userNav.filter(item => item.label !== 'Deposit review' || canReviewDeposits);
 
   return (
     <div className="app-frame">
@@ -98,7 +99,7 @@ export default function App() {
         </header>
 
         <div className="page-content">
-          {page === 'admin' ? <AdminDashboard active={active} /> : <UserDashboard active={active} />}
+          {page === 'admin' ? <AdminDashboard active={active} /> : <UserDashboard active={active} onReviewerAccessChange={setCanReviewDeposits} />}
           <footer className="footer"><span>© {new Date().getFullYear()} Thrift Collector Platform</span><span>Built for clarity, trust and accountability</span></footer>
         </div>
         <nav className="mobile-tabs" aria-label="Quick navigation">
@@ -125,7 +126,7 @@ type DepositBank = { code: string; name: string; provider: string; currency_code
 type ProviderDeposit = { id: number; provider: string; provider_transaction_id: string; provider_reference: string | null; amount_minor: number; currency_code: string; status: string; occurred_at: string | null; created_at: string; user_id: number | null; account?: { bank_name?: string; account_name_ciphertext?: string | null } | null; safe_metadata?: { channel?: string; account_matched?: boolean } | null };
 type DashboardSummary = { user: DashboardProfile; active_workspaces_count: number; workspaces: Array<{ id: number; name: string; country_code: string; status: string; role: string }>; active_groups_count: number; groups: Array<{ id: number; business_id: number; name: string; description: string | null; currency_code: string; status: string; role: string; joined_at: string | null }>; confirmed_contribution_totals: Array<{ currency_code: string; total_minor: number; records_count: number }>; recent_contributions: Array<{ id: number; thrift_group_id: number; user_id: number; amount_minor: number; currency_code: string; status: string; collection_method: string; reference: string | null; created_at: string; confirmed_at: string | null; group: { id: number; name: string; currency_code: string } | null }>; upcoming_obligations_count: number; upcoming_obligations: Array<{ id: number; status: string; expected_amount_minor: number; currency_code: string; due_on: string | null; group: { id: number; name: string } | null }>; financial_data_status: string; message: string };
 
-function UserDashboard({ active }: { active: string }) {
+function UserDashboard({ active, onReviewerAccessChange }: { active: string; onReviewerAccessChange: (allowed: boolean) => void }) {
   const [token, setToken] = useState(() => sessionStorage.getItem('tcp_access_token') ?? '');
   const [profile, setProfile] = useState<DashboardProfile | null>(null);
   const [dashboardData, setDashboardData] = useState<DashboardSummary | null>(null);
@@ -169,6 +170,11 @@ function UserDashboard({ active }: { active: string }) {
       .finally(() => { if (!cancelled) setAuthLoading(false); });
     return () => { cancelled = true; };
   }, [token]);
+
+  useEffect(() => {
+    const role = dashboardData?.workspaces.find(workspace => String(workspace.id) === selectedBusinessId)?.role;
+    onReviewerAccessChange(['business_owner', 'business_manager', 'auditor'].includes(role ?? ''));
+  }, [dashboardData, selectedBusinessId, onReviewerAccessChange]);
 
   useEffect(() => {
     if (!token || !selectedBusinessId) {
