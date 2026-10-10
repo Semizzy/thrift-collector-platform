@@ -51,11 +51,13 @@ final class BusinessMembershipManagementTest extends TestCase
         ]);
         $managerToken = $this->tokenFor($manager);
 
-        foreach (['business_owner', 'business_manager'] as $role) {
-            $this->withToken($managerToken)->postJson('/api/v1/business/invitations', [
-                'email' => 'new.member@example.test', 'role' => $role,
-            ], ['X-Business-Id' => (string) $business->id])->assertForbidden();
-        }
+        $this->withToken($managerToken)->postJson('/api/v1/business/invitations', [
+            'email' => 'new.member@example.test', 'role' => 'business_owner',
+        ], ['X-Business-Id' => (string) $business->id])->assertUnprocessable();
+
+        $this->withToken($managerToken)->postJson('/api/v1/business/invitations', [
+            'email' => 'new.member@example.test', 'role' => 'business_manager',
+        ], ['X-Business-Id' => (string) $business->id])->assertForbidden();
     }
 
     public function test_invitation_acceptance_requires_matching_verified_email_and_is_one_time(): void
@@ -96,9 +98,16 @@ final class BusinessMembershipManagementTest extends TestCase
         $invitee = $this->verifiedUser('expiry@example.test');
         $token = str_repeat('x', 64);
         $this->invitation($business, $owner, $invitee->email, $token, now()->subMinute());
+        $revokedToken = str_repeat('r', 64);
+        $revoked = $this->invitation($business, $owner, 'another-invitee@example.test', $revokedToken);
+        $revoked->forceFill(['revoked_at' => now()])->save();
 
-        $this->withToken($this->tokenFor($invitee))->postJson('/api/v1/business/invitations/accept', [
+        $accessToken = $this->tokenFor($invitee);
+        $this->withToken($accessToken)->postJson('/api/v1/business/invitations/accept', [
             'token' => $token,
+        ])->assertStatus(410);
+        $this->withToken($accessToken)->postJson('/api/v1/business/invitations/accept', [
+            'token' => $revokedToken,
         ])->assertStatus(410);
         $this->assertDatabaseMissing('business_memberships', ['business_id' => $business->id, 'user_id' => $invitee->id]);
     }
