@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 final class PaymentWorkflowTest extends TestCase
@@ -540,7 +541,7 @@ final class PaymentWorkflowTest extends TestCase
 
     public function test_atomic_wallet_debit_guard_rolls_back_journal_when_balance_changes_during_withdrawal(): void
     {
-        if (\Illuminate\\Support\\Facades\\DB::getDriverName() !== 'sqlite') {
+        if (DB::getDriverName() !== 'sqlite') {
             $this->markTestSkipped('This race-injection test uses a SQLite trigger; production concurrency is protected by row locks and the conditional debit update.');
         }
 
@@ -549,7 +550,7 @@ final class PaymentWorkflowTest extends TestCase
         $ledger->creditContribution((int) $business->id, (int) $owner->id, 'NGN', 10000, 90010, (int) $reviewer->id);
 
         $walletKey = 'wallet:'.$owner->id.':NGN';
-        \Illuminate\\Support\\Facades\\DB::unprepared(
+        DB::unprepared(
             "CREATE TRIGGER simulate_wallet_debit_race BEFORE UPDATE OF balance_minor ON wallet_accounts ".
             "WHEN OLD.account_key = '".$walletKey."' AND NEW.balance_minor < OLD.balance_minor ".
             "BEGIN SELECT RAISE(IGNORE); END"
@@ -562,7 +563,7 @@ final class PaymentWorkflowTest extends TestCase
         $this->assertDatabaseMissing('wallet_ledger_transactions', [
             'business_id' => $business->id, 'idempotency_key' => 'payout:90011:wallet-debit',
         ]);
-        $this->assertSame(0, (int) \Illuminate\\Support\\Facades\\DB::table('wallet_accounts')
+        $this->assertSame(0, (int) DB::table('wallet_accounts')
             ->where('business_id', $business->id)->where('account_key', 'payout-payable:NGN')->value('balance_minor'));
     }
 
@@ -673,15 +674,15 @@ final class PaymentWorkflowTest extends TestCase
         $this->assertSame(15000, $ledger->balance((int) $business->id, (int) $owner->id, 'NGN'));
         $this->assertDatabaseCount('wallet_ledger_transactions', 3);
 
-        $journalIds = \Illuminate\\Support\\Facades\\DB::table('wallet_ledger_transactions')
+        $journalIds = DB::table('wallet_ledger_transactions')
             ->where('business_id', $business->id)->pluck('id');
         foreach ($journalIds as $journalId) {
-            $debits = (int) \Illuminate\\Support\\Facades\\DB::table('wallet_ledger_entries')
+            $debits = (int) DB::table('wallet_ledger_entries')
                 ->where('wallet_ledger_transaction_id', $journalId)->where('direction', 'debit')->sum('amount_minor');
-            $credits = (int) \Illuminate\\Support\\Facades\\DB::table('wallet_ledger_entries')
+            $credits = (int) DB::table('wallet_ledger_entries')
                 ->where('wallet_ledger_transaction_id', $journalId)->where('direction', 'credit')->sum('amount_minor');
             $this->assertSame($debits, $credits, 'Ledger transaction '.$journalId.' must balance.');
-            $this->assertSame(2, \Illuminate\\Support\\Facades\\DB::table('wallet_ledger_entries')
+            $this->assertSame(2, DB::table('wallet_ledger_entries')
                 ->where('wallet_ledger_transaction_id', $journalId)->count(), 'Wallet journal should contain exactly two posting lines.');
         }
     }
