@@ -37,6 +37,17 @@ class BusinessMembershipController extends Controller
         return response()->json(['data' => $members]);
     }
 
+    public function auditEvents(Request $request): JsonResponse
+    {
+        $business = $request->attributes->get('current_business');
+        $events = $business->auditEvents()
+            ->with('actor:id,name,email')
+            ->orderByDesc('created_at')
+            ->paginate(50);
+
+        return response()->json(['data' => $events]);
+    }
+
     public function invitations(Request $request): JsonResponse
     {
         $business = $request->attributes->get('current_business');
