@@ -116,7 +116,8 @@ class PaystackWebhookController extends Controller
             if (in_array($eventType, ['dedicated_account.assign.success', 'dedicated_account.assign.failed', 'dedicated_account.assign.failure'], true)) {
                 if ($account) {
                     $failed = str_ends_with($eventType, 'failed') || str_ends_with($eventType, 'failure');
-                    $fields = ['status' => $failed ? 'failed' : 'active'];
+                    $assigned = ! $failed && $accountNumber !== '' && $accountName !== '';
+                    $fields = ['status' => $failed ? 'failed' : ($assigned ? 'active' : 'provisioning')];
                     if ($accountId !== '') $fields['provider_account_id'] = $accountId;
                     if ($customerCode !== '') $fields['provider_customer_id'] = $customerCode;
                     if ($accountNumber !== '') {
@@ -127,7 +128,7 @@ class PaystackWebhookController extends Controller
                     if (! empty($bank['slug'])) $fields['bank_code'] = (string) $bank['slug'];
                     if (! empty($bank['name'])) $fields['bank_name'] = (string) $bank['name'];
                     if (! empty($data['currency'])) $fields['currency_code'] = (string) $data['currency'];
-                    if (! $failed && $accountNumber !== '' && $accountName !== '') $fields['assigned_at'] = now();
+                    if ($assigned) $fields['assigned_at'] = now();
                     $account->forceFill($fields)->save();
                     PaymentOperationEvent::query()->create([
                         'business_id' => $matchedBusinessId, 'operation_type' => 'user_deposit_account',
