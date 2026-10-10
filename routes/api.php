@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\V1\ThriftGroupController;
 use App\Http\Controllers\Api\V1\ContributionRecordController;
 use App\Http\Controllers\Api\V1\ContributionScheduleController;
 use App\Http\Controllers\Api\V1\ContributionAdjustmentController;
+use App\Http\Controllers\Api\V1\ReconciliationController;
 use App\Http\Controllers\Api\V1\PlatformAdminController;
 use App\Http\Middleware\AuthenticateApiToken;
 use App\Http\Middleware\EnsureVerifiedEmail;
@@ -70,6 +71,13 @@ Route::prefix('v1')->group(function (): void {
 
         Route::middleware(RequireBusinessMembership::class)->prefix('business')->group(function (): void {
             Route::get('/current', [BusinessController::class, 'current']);
+            Route::get('/reconciliation/batches', [ReconciliationController::class, 'index'])
+                ->middleware(RequireBusinessPermission::class.':reconciliation.manage');
+            Route::post('/reconciliation/batches', [ReconciliationController::class, 'store'])
+                ->middleware([RequireBusinessPermission::class.':reconciliation.manage', 'throttle:10,1']);
+            Route::post('/reconciliation/entries/{entryId}/decision', [ReconciliationController::class, 'match'])
+                ->whereNumber('entryId')
+                ->middleware(RequireBusinessPermission::class.':reconciliation.manage');
             Route::get('/groups', [ThriftGroupController::class, 'index'])
                 ->middleware(RequireBusinessPermission::class.':arrangements.view');
             Route::post('/groups', [ThriftGroupController::class, 'store'])
