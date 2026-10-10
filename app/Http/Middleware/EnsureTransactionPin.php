@@ -57,19 +57,21 @@ class EnsureTransactionPin
                 if ($existing && filled($existing->purpose) && $existing->purpose !== trim($data['purpose'])) {
                     return response()->json(['message' => 'This idempotency reference was already used with a different transaction purpose.'], 409);
                 }
-                DB::table($table)->where('business_id', $business->id)->where('id', (int) $recordId)
-                    ->where('user_id', $user->id)->whereNull('purpose')
-                    ->update(['purpose' => trim($data['purpose']), 'updated_at' => now()]);
-                DB::table('payment_operation_events')->insert([
-                    'business_id' => $business->id,
-                    'operation_type' => $table === 'deposit_intents' ? 'deposit' : 'payout',
-                    'operation_id' => (int) $recordId,
-                    'actor_user_id' => $user->id,
-                    'event' => 'transaction_purpose_recorded',
-                    'reason' => trim($data['purpose']),
-                    'evidence' => json_encode(['transaction_pin_verified' => true, 'financial_posting' => false], JSON_THROW_ON_ERROR),
-                    'created_at' => now(),
-                ]);
+                if (! $existing || blank($existing->purpose)) {
+                    DB::table($table)->where('business_id', $business->id)->where('id', (int) $recordId)
+                        ->where('user_id', $user->id)->whereNull('purpose')
+                        ->update(['purpose' => trim($data['purpose']), 'updated_at' => now()]);
+                    DB::table('payment_operation_events')->insert([
+                        'business_id' => $business->id,
+                        'operation_type' => $table === 'deposit_intents' ? 'deposit' : 'payout',
+                        'operation_id' => (int) $recordId,
+                        'actor_user_id' => $user->id,
+                        'event' => 'transaction_purpose_recorded',
+                        'reason' => trim($data['purpose']),
+                        'evidence' => json_encode(['transaction_pin_verified' => true, 'financial_posting' => false], JSON_THROW_ON_ERROR),
+                        'created_at' => now(),
+                    ]);
+                }
             }
         }
 
