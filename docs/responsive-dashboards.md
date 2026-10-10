@@ -1,6 +1,6 @@
 # Responsive dashboard implementation requirements
 
-This specification is the acceptance checklist for the upcoming user and platform-admin dashboard UI. The repository currently contains the Laravel API/auth foundation; these requirements do not claim that dashboard pages are already implemented.
+This specification is the acceptance checklist for the upcoming user and platform-admin dashboard UI. The repository contains a Laravel API/auth foundation and an initial React/TypeScript responsive dashboard scaffold. The current user dashboard deliberately shows empty states until real endpoints are integrated. The admin screen is a preview only, with no live data or privileged actions; it is not production admin authorization.
 
 ## Supported viewports
 
