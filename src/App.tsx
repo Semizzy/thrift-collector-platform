@@ -187,6 +187,7 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   const [payoutRequests, setPayoutRequests] = useState<PaymentRequest[]>([]);
   const [paymentBanks, setPaymentBanks] = useState<PayoutBank[]>([]);
   const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentRefreshKey, setPaymentRefreshKey] = useState(0);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [paymentError, setPaymentError] = useState('');
   const [paymentMessage, setPaymentMessage] = useState('');
@@ -383,7 +384,7 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
     }).catch(error => { if (!cancelled) setPaymentError(error instanceof Error ? error.message : 'Could not load payment requests.'); })
       .finally(() => { if (!cancelled) setPaymentLoading(false); });
     return () => { cancelled = true; };
-  }, [token, selectedBusinessId, active]);
+  }, [token, selectedBusinessId, active, paymentRefreshKey]);
 
   function newClientReference(prefix: string) {
     return prefix + '-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2, 9).toUpperCase();
@@ -564,7 +565,7 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
     </section>
     {paymentError && <p className="auth-error" role="alert">{paymentError}</p>}
     {paymentMessage && <p className="account-success" role="status">{paymentMessage}</p>}
-    <section className="panel"><div className="panel-heading"><div><h2>Deposit request history</h2><p>Evidence review is separate from balance crediting.</p></div><button className="text-button" onClick={() => setActive('Deposit & payout')}>Refresh <RefreshCw size={14} /></button></div>
+    <section className="panel"><div className="panel-heading"><div><h2>Deposit request history</h2><p>Evidence review is separate from balance crediting.</p></div><button className="text-button" onClick={() => setPaymentRefreshKey(value => value + 1)}><RefreshCw size={14} /> Refresh</button></div>
       {paymentLoading ? <p className="muted">Loading request history…</p> : depositRequests.length ? <div className="payment-history">{depositRequests.map(item => <PaymentHistoryRow key={'deposit-'+item.id} item={item} />)}</div> : <EmptyPanel icon={ArrowDownLeft} title="No deposit requests" body="Your submitted deposit requests will appear here." />}
     </section>
     <section className="panel"><div className="panel-heading"><div><h2>Payout request history</h2><p>Approval status is not proof that a transfer was made.</p></div></div>
