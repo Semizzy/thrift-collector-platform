@@ -49,6 +49,8 @@ The React/TypeScript dashboard is compiled to `public/app/` by `npm run build`. 
 
 Prefer the database queue driver for the first shared-hosting release. If asynchronous work is introduced, confirm whether the host permits a reliable scheduled queue runner. Use bounded jobs, retries with backoff, idempotency keys, and explicit failure handling. Do not depend on Redis, RabbitMQ, Supervisor, systemd, Docker, root access, or a permanently running worker on ordinary shared hosting.
 
+The scheduler also runs `payments:recover-deposit-accounts --limit=50` every ten minutes. It checks only Paystack dedicated-account records that have remained in `provisioning` for at least ten minutes, records each attempt, and stops automatic retries after 12 attempts. It queries existing provider account/customer data and never creates a replacement account. Confirm scheduler output/logs and provider credentials before relying on this recovery path; unresolved records remain pending for support rather than being marked active without provider evidence.
+
 Cron is not a substitute for idempotency. A job may run late or more than once; financial or notification jobs must safely tolerate duplicate execution.
 
 ## Backup and recovery
