@@ -139,7 +139,7 @@ jobs:
             fi
             sleep 2
           done
-          mysql -h 127.0.0.1 -P 3306 -uthrift_test -pthrift_test_password -Nse "SELECT VERSION()" | grep -E '^8\\.0\\.'
+          mysql -h 127.0.0.1 -P 3306 -uthrift_test -pthrift_test_password -Nse "SELECT VERSION()" | grep -E '^8\.0\.'
 
       - name: Run all migrations and seed the disposable MySQL database
         run: php artisan migrate:fresh --seed --force
