@@ -94,3 +94,53 @@ jobs:
           SESSION_DRIVER: array
           QUEUE_CONNECTION: sync
           LOG_CHANNEL: stderr
+
+  deployment-package:
+    name: Assemble cPanel deployment package
+    runs-on: ubuntu-latest
+    needs: [frontend-build, domain-tests]
+    steps:
+      - name: Check out verified commit
+        uses: actions/checkout@v4
+
+      - name: Set up PHP for production dependencies
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer:v2
+          coverage: none
+
+      - name: Install production Composer dependencies
+        run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+        env:
+          APP_ENV: production
+          APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ':memory:'
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+
+      - name: Download tested frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: thrift-collector-frontend
+          path: public/app
+
+      - name: Assemble source, migrations, docs and compiled frontend
+        run: |
+          test -s public/app/index.html
+          mkdir -p deployment-package
+          cp -a app bootstrap config database docs public resources routes storage vendor deployment-package/
+          cp -a artisan composer.json composer.lock .env.example README.md deployment-package/
+          test ! -e deployment-package/.env
+          test -s deployment-package/public/app/index.html
+          zip -qr thrift-collector-deployment.zip deployment-package
+
+      - name: Upload full cPanel deployment package
+        uses: actions/upload-artifact@v4
+        with:
+          name: thrift-collector-deployment
+          path: thrift-collector-deployment.zip
+          if-no-files-found: error
+          retention-days: 14
