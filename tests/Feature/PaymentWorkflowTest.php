@@ -24,7 +24,7 @@ final class PaymentWorkflowTest extends TestCase
             'name' => 'Payments Business', 'slug' => 'payments-business', 'country_code' => 'NG',
             'status' => 'active', 'created_by_user_id' => $owner->id,
         ]);
-        foreach ([$owner => 'business_owner', $reviewer => 'business_manager'] as $user => $role) {
+        foreach ([[$owner, 'business_owner'], [$reviewer, 'business_manager']] as [$user, $role]) {
             BusinessMembership::query()->create([
                 'business_id' => $business->id, 'user_id' => $user->id, 'role' => $role,
                 'status' => 'active', 'joined_at' => now(),
