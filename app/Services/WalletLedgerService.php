@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Exceptions\InsufficientWalletBalance;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -119,7 +120,12 @@ class WalletLedgerService
 
             $existing = DB::table('wallet_ledger_transactions')->where('business_id', $businessId)
                 ->where('idempotency_key', $idempotencyKey)->first();
-            if ($existing) return ['status' => 'already_posted', 'transaction_id' => $existing->id];
+            if ($existing) {
+                if (! $this->existingPostingMatches($existing, $businessId, $currency, $sourceType, $sourceId, $lines, $metadata)) {
+                    throw new InvalidArgumentException('An idempotency key cannot be reused with different ledger details.');
+                }
+                return ['status' => 'already_posted', 'transaction_id' => $existing->id];
+            }
 
             if ($requiredWalletBalanceKey !== null
                 && (int) $accounts[$requiredWalletBalanceKey]->balance_minor < array_sum(array_map(
@@ -167,7 +173,53 @@ class WalletLedgerService
             }, 3);
         } catch (InsufficientWalletBalance) {
             return ['status' => 'insufficient_balance', 'transaction_id' => null];
+        } catch (QueryException $exception) {
+            // Concurrent requests can reach the unique idempotency constraint before observing
+            // the winning transaction. Treat only an exact matching journal as a replay.
+            $existing = DB::table('wallet_ledger_transactions')->where('business_id', $businessId)
+                ->where('idempotency_key', $idempotencyKey)->first();
+            if ($existing && $this->existingPostingMatches($existing, $businessId, $currency, $sourceType, $sourceId, $lines, $metadata)) {
+                return ['status' => 'already_posted', 'transaction_id' => $existing->id];
+            }
+            throw $exception;
         }
+    }
+
+    private function existingPostingMatches(object $transaction, int $businessId, string $currency, string $sourceType, int $sourceId, array $lines, array $metadata): bool
+    {
+        if ((int) $transaction->business_id !== $businessId
+            || $transaction->currency_code !== $currency
+            || $transaction->source_type !== $sourceType
+            || (int) $transaction->source_id !== $sourceId
+            || (json_decode((string) $transaction->metadata, true) ?? []) !== $metadata) {
+            return false;
+        }
+
+        $expected = array_map(static fn (array $line): array => [
+            'account_key' => $line['key'],
+            'direction' => $line['direction'],
+            'amount_minor' => (int) $line['amount'],
+        ], $lines);
+        $actual = DB::table('wallet_ledger_entries as e')
+            ->join('wallet_accounts as a', 'a.id', '=', 'e.wallet_account_id')
+            ->where('e.wallet_ledger_transaction_id', $transaction->id)
+            ->get(['a.account_key', 'e.direction', 'e.amount_minor'])
+            ->map(static fn ($row): array => [
+                'account_key' => $row->account_key,
+                'direction' => $row->direction,
+                'amount_minor' => (int) $row->amount_minor,
+            ])->all();
+
+        $sort = static function (array &$items): void {
+            usort($items, static fn (array $a, array $b): int =>
+                [$a['account_key'], $a['direction'], $a['amount_minor']]
+                <=> [$b['account_key'], $b['direction'], $b['amount_minor']]
+            );
+        };
+        $sort($expected);
+        $sort($actual);
+
+        return $expected === $actual;
     }
 
     private function walletKey(int $userId, string $currency): string

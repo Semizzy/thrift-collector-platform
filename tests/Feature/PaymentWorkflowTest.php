@@ -724,4 +724,15 @@ final class PaymentWorkflowTest extends TestCase
         $this->assertSame(12500, $ledger->balance((int) $business->id, (int) $owner->id, 'NGN'));
     }
 
+    public function test_wallet_ledger_rejects_idempotency_key_reuse_with_different_amount(): void
+    {
+        [$owner, $reviewer, $business] = $this->fixture();
+        $ledger = app(WalletLedgerService::class);
+        $ledger->creditContribution((int) $business->id, (int) $owner->id, 'NGN', 10000, 990015, (int) $reviewer->id);
+        $first = $ledger->debitWithdrawal((int) $business->id, (int) $owner->id, 'NGN', 5000, 990016, (int) $reviewer->id);
+        self::assertSame('posted', $first['status']);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $ledger->debitWithdrawal((int) $business->id, (int) $owner->id, 'NGN', 4000, 990016, (int) $reviewer->id);
+    }
 }

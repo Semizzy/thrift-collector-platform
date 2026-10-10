@@ -17,30 +17,49 @@ class EnsureTransactionPin
             return response()->json(['message' => 'Set a four-digit transaction PIN before submitting this transaction.', 'code' => 'transaction_pin_required'], 428);
         }
 
-        if ($user->transaction_pin_locked_until && $user->transaction_pin_locked_until->isFuture()) {
-            return response()->json(['message' => 'Transaction PIN verification is temporarily locked after repeated failures. Try again later.'], 429);
-        }
-
         $data = $request->validate([
             'transaction_pin' => ['required', 'digits:4'],
             'purpose' => ['required', 'string', 'min:3', 'max:255'],
         ]);
 
-        if (! Hash::check($data['transaction_pin'], $user->transaction_pin_hash)) {
-            $attempts = (int) $user->transaction_pin_failed_attempts + 1;
-            $user->forceFill([
-                'transaction_pin_failed_attempts' => $attempts >= 5 ? 0 : $attempts,
-                'transaction_pin_locked_until' => $attempts >= 5 ? now()->addMinutes(15) : null,
-            ])->save();
+        $verification = DB::transaction(function () use ($user, $data): array {
+            $lockedUser = \App\Models\User::query()->whereKey($user->id)->lockForUpdate()->firstOrFail();
+            if ($lockedUser->transaction_pin_locked_until && $lockedUser->transaction_pin_locked_until->isFuture()) {
+                return ['status' => 'locked', 'until' => $lockedUser->transaction_pin_locked_until->toIso8601String()];
+            }
+            if ($lockedUser->transaction_pin_locked_until && ! $lockedUser->transaction_pin_locked_until->isFuture()) {
+                $lockedUser->forceFill(['transaction_pin_failed_attempts' => 0, 'transaction_pin_locked_until' => null])->save();
+                $lockedUser->refresh();
+            }
 
+            if (! Hash::check($data['transaction_pin'], $lockedUser->transaction_pin_hash)) {
+                $attempts = min(3, (int) $lockedUser->transaction_pin_failed_attempts + 1);
+                $attributes = ['transaction_pin_failed_attempts' => $attempts];
+                if ($attempts >= 3) {
+                    $lockedUntil = now()->addMinutes(15);
+                    $attributes['transaction_pin_locked_until'] = $lockedUntil;
+                }
+                $lockedUser->forceFill($attributes)->save();
+
+                return $attempts >= 3
+                    ? ['status' => 'locked', 'until' => $lockedUntil->toIso8601String()]
+                    : ['status' => 'invalid'];
+            }
+
+            $lockedUser->forceFill(['transaction_pin_failed_attempts' => 0, 'transaction_pin_locked_until' => null])->save();
+            return ['status' => 'ok'];
+        }, 3);
+
+        if ($verification['status'] === 'locked') {
             return response()->json([
-                'message' => $attempts >= 5
-                    ? 'Too many incorrect PIN attempts. Transactions are locked for 15 minutes.'
-                    : 'Transaction PIN is incorrect.',
-            ], 422);
+                'message' => 'Transaction PIN is locked after three incorrect attempts. Try again after the lockout expires.',
+                'locked_until' => $verification['until'],
+            ], 429);
+        }
+        if ($verification['status'] !== 'ok') {
+            return response()->json(['message' => 'Transaction PIN is incorrect. One more failed attempt will lock transactions for 15 minutes.'], 422);
         }
 
-        $user->forceFill(['transaction_pin_failed_attempts' => 0, 'transaction_pin_locked_until' => null])->save();
         $request->attributes->set('verified_transaction_pin', true);
         $response = $next($request);
 
