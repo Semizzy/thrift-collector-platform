@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\BusinessAuditEvent;
 use App\Models\ContributionRecord;
 use App\Models\ThriftGroup;
+use App\Services\WalletLedgerService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -67,10 +68,10 @@ class ContributionRecordController extends Controller
         return response()->json(['data' => $record, 'message' => 'Contribution recorded; this is not proof of deposit or settlement.'], 201);
     }
 
-    public function confirm(Request $request, int $groupId, int $recordId): JsonResponse
+    public function confirm(Request $request, int $groupId, int $recordId, WalletLedgerService $ledger): JsonResponse
     {
         $business = $request->attributes->get('current_business');
-        $result = DB::transaction(function () use ($request, $business, $groupId, $recordId) {
+        $result = DB::transaction(function () use ($request, $business, $groupId, $recordId, $ledger) {
             $record = ContributionRecord::query()->where('thrift_group_id', $groupId)
                 ->whereHas('group', fn ($query) => $query->where('business_id', $business->id))
                 ->whereKey($recordId)->lockForUpdate()->first();
@@ -84,13 +85,20 @@ class ContributionRecordController extends Controller
                 return response()->json(['message' => 'Only recorded contributions can be confirmed. Corrections require a separate reversal workflow.'], 409);
             }
             $record->forceFill(['status' => 'confirmed', 'confirmed_by_user_id' => $request->user()->id, 'confirmed_at' => now()])->save();
+            $walletPosting = ['status' => 'not_posted', 'reason' => 'Awaiting independent settlement reconciliation.'];
+            if ($record->collection_method === 'cash') {
+                $walletPosting = $ledger->creditContribution(
+                    (int) $business->id, (int) $record->user_id, $record->currency_code,
+                    (int) $record->amount_minor, (int) $record->id, (int) $request->user()->id
+                );
+            }
             BusinessAuditEvent::query()->create([
                 'business_id' => $business->id, 'actor_user_id' => $request->user()->id,
                 'action' => 'contribution.confirmed', 'subject_type' => 'contribution_record', 'subject_id' => $record->id,
-                'metadata' => ['group_id' => $groupId, 'amount_minor' => $record->amount_minor, 'currency_code' => $record->currency_code, 'note' => 'Record confirmation does not prove bank/provider settlement.'],
+                'metadata' => ['group_id' => $groupId, 'amount_minor' => $record->amount_minor, 'currency_code' => $record->currency_code, 'wallet_posting' => $walletPosting, 'note' => 'Cash credited after independent confirmation; non-cash collection requires reconciliation.'],
                 'ip_address' => $request->ip(), 'user_agent' => Str::limit((string) $request->userAgent(), 500, ''), 'created_at' => now(),
             ]);
-            return response()->json(['data' => $record, 'message' => 'Contribution record confirmed. This does not confirm bank/provider settlement.']);
+            return response()->json(['data' => $record, 'wallet_posting' => $walletPosting, 'message' => $record->collection_method === 'cash' ? 'Cash contribution confirmed and credited to the member wallet.' : 'Contribution record confirmed. Wallet credit awaits independent bank/provider reconciliation.']);
         });
         return $result;
     }
