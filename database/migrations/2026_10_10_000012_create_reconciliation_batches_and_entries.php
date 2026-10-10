@@ -35,7 +35,7 @@ return new class extends Migration {
             $table->char('row_fingerprint', 64);
             $table->json('source_data')->nullable();
             $table->timestamps();
-            $table->unique(['reconciliation_batch_id', 'row_fingerprint'], 'recon_entry_fingerprint_unique');
+            $table->index(['reconciliation_batch_id', 'row_fingerprint'], 'recon_entry_fingerprint_idx');
             $table->index(['reconciliation_batch_id', 'status']);
             $table->index(['normalized_reference', 'currency_code', 'amount_minor'], 'recon_entry_match_idx');
         });
