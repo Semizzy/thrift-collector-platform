@@ -71,6 +71,12 @@ Route::prefix('v1')->group(function (): void {
                 ->middleware(RequireBusinessPermission::class.':arrangements.view');
             Route::post('/groups', [ThriftGroupController::class, 'store'])
                 ->middleware([RequireBusinessPermission::class.':arrangements.manage', 'throttle:10,1']);
+            Route::post('/groups/{groupId}/members', [ThriftGroupController::class, 'addMember'])
+                ->whereNumber('groupId')
+                ->middleware([RequireBusinessPermission::class.':members.manage', 'throttle:20,1']);
+            Route::delete('/groups/{groupId}/members/{userId}', [ThriftGroupController::class, 'removeMember'])
+                ->whereNumber('groupId')->whereNumber('userId')
+                ->middleware(RequireBusinessPermission::class.':members.manage');
             Route::get('/groups/{groupId}/contributions', [ContributionRecordController::class, 'index'])
                 ->whereNumber('groupId')
                 ->middleware(RequireBusinessPermission::class.':arrangements.view');
