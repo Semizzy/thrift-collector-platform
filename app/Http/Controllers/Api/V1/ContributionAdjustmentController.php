@@ -48,21 +48,33 @@ class ContributionAdjustmentController extends Controller
         }
         if ($record->status === 'reversed') return response()->json(['message' => 'This contribution record is already reversed.'], 409);
 
-        $adjustment = DB::transaction(function () use ($request, $business, $record, $data): ContributionRecordAdjustment {
+        $adjustment = DB::transaction(function () use ($request, $business, $record, $data) {
+            $lockedRecord = ContributionRecord::query()->whereKey($record->id)->lockForUpdate()->firstOrFail();
+            $conflict = ContributionRecordAdjustment::query()->where('contribution_record_id', $lockedRecord->id)
+                ->where(function ($query): void {
+                    $query->where('status', 'pending')
+                        ->orWhere(fn ($approved) => $approved->where('status', 'approved')->where('adjustment_type', 'reversal'));
+                })->exists();
+            if ($conflict) {
+                return null;
+            }
             $adjustment = ContributionRecordAdjustment::query()->create([
-                'contribution_record_id' => $record->id, 'thrift_group_id' => $record->thrift_group_id,
+                'contribution_record_id' => $lockedRecord->id, 'thrift_group_id' => $lockedRecord->thrift_group_id,
                 'adjustment_type' => $data['adjustment_type'], 'proposed_amount_minor' => $data['proposed_amount_minor'] ?? null,
                 'reason' => trim($data['reason']), 'status' => 'pending', 'requested_by_user_id' => $request->user()->id,
             ]);
             BusinessAuditEvent::query()->create([
                 'business_id' => $business->id, 'actor_user_id' => $request->user()->id,
                 'action' => 'contribution_adjustment.requested', 'subject_type' => 'contribution_record_adjustment', 'subject_id' => $adjustment->id,
-                'metadata' => ['record_id' => $record->id, 'type' => $adjustment->adjustment_type, 'reason' => $adjustment->reason, 'proposed_amount_minor' => $adjustment->proposed_amount_minor, 'note' => 'Request only; original contribution record remains unchanged.'],
+                'metadata' => ['record_id' => $lockedRecord->id, 'type' => $adjustment->adjustment_type, 'reason' => $adjustment->reason, 'proposed_amount_minor' => $adjustment->proposed_amount_minor, 'note' => 'Request only; original contribution record remains unchanged.'],
                 'ip_address' => $request->ip(), 'user_agent' => Str::limit((string) $request->userAgent(), 500, ''), 'created_at' => now(),
             ]);
             return $adjustment;
         });
 
+        if (! $adjustment) {
+            return response()->json(['message' => 'A pending adjustment or approved reversal already exists for this contribution record.'], 409);
+        }
         return response()->json(['data' => $adjustment, 'message' => 'Adjustment request recorded for independent review. Original contribution data is unchanged.'], 201);
     }
 
