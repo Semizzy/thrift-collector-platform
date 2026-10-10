@@ -93,6 +93,7 @@ class AuthController extends Controller
             'email' => ['required', 'email:rfc', 'max:254'],
             'token' => ['required', 'string'],
             'password' => ['required', 'string', 'min:12', 'max:200', 'confirmed'],
+            'password_confirmation' => ['required', 'string', 'min:12', 'max:200'],
         ]);
 
         $status = Password::reset(
