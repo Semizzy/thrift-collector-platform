@@ -8,6 +8,8 @@ use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\AdminDashboardController;
 use App\Http\Controllers\Api\V1\ThriftGroupController;
 use App\Http\Controllers\Api\V1\ContributionRecordController;
+use App\Http\Controllers\Api\V1\ContributionScheduleController;
+use App\Http\Controllers\Api\V1\ContributionAdjustmentController;
 use App\Http\Controllers\Api\V1\PlatformAdminController;
 use App\Http\Middleware\AuthenticateApiToken;
 use App\Http\Middleware\EnsureVerifiedEmail;
@@ -35,7 +37,8 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/dashboard/summary', [DashboardController::class, 'summary']);
 
         Route::middleware(RequirePlatformAdmin::class)->prefix('admin')->group(function (): void {
-            Route::get('/dashboard', [AdminDashboardController::class, 'summary']);
+            Route::get('/dashboard', [AdminDashboardController::class, 'summary'])
+                ->middleware(RequirePlatformPermission::class.':platform.users.view');
             Route::post('/users/{userId}/provision', [PlatformAdminController::class, 'provision'])
                 ->whereNumber('userId')
                 ->middleware(RequirePlatformPermission::class.':platform.admins.manage');
@@ -77,6 +80,27 @@ Route::prefix('v1')->group(function (): void {
             Route::delete('/groups/{groupId}/members/{userId}', [ThriftGroupController::class, 'removeMember'])
                 ->whereNumber('groupId')->whereNumber('userId')
                 ->middleware(RequireBusinessPermission::class.':members.manage');
+            Route::get('/groups/{groupId}/schedules', [ContributionScheduleController::class, 'index'])
+                ->whereNumber('groupId')
+                ->middleware(RequireBusinessPermission::class.':arrangements.view');
+            Route::post('/groups/{groupId}/schedules', [ContributionScheduleController::class, 'store'])
+                ->whereNumber('groupId')
+                ->middleware([RequireBusinessPermission::class.':arrangements.manage', 'throttle:10,1']);
+            Route::post('/groups/{groupId}/schedules/{scheduleId}/generate-cycles', [ContributionScheduleController::class, 'generateCycles'])
+                ->whereNumber('groupId')->whereNumber('scheduleId')
+                ->middleware([RequireBusinessPermission::class.':arrangements.manage', 'throttle:10,1']);
+            Route::get('/groups/{groupId}/cycles', [ContributionScheduleController::class, 'cycles'])
+                ->whereNumber('groupId')
+                ->middleware(RequireBusinessPermission::class.':arrangements.view');
+            Route::get('/groups/{groupId}/adjustments', [ContributionAdjustmentController::class, 'index'])
+                ->whereNumber('groupId')
+                ->middleware(RequireBusinessPermission::class.':disputes.review');
+            Route::post('/groups/{groupId}/contributions/{recordId}/adjustments', [ContributionAdjustmentController::class, 'request'])
+                ->whereNumber('groupId')->whereNumber('recordId')
+                ->middleware([RequireBusinessPermission::class.':contributions.record', 'throttle:10,1']);
+            Route::post('/groups/{groupId}/adjustments/{adjustmentId}/decide', [ContributionAdjustmentController::class, 'decide'])
+                ->whereNumber('groupId')->whereNumber('adjustmentId')
+                ->middleware(RequireBusinessPermission::class.':disputes.review');
             Route::get('/groups/{groupId}/contributions', [ContributionRecordController::class, 'index'])
                 ->whereNumber('groupId')
                 ->middleware(RequireBusinessPermission::class.':arrangements.view');
