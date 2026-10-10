@@ -195,6 +195,7 @@ class PaymentWorkflowController extends Controller
             ]);
             return response()->json(['data' => $payout, 'message' => 'Manual payment evidence recorded for reconciliation. This is not provider-verified proof of payment and does not debit a ledger.']);
         });
+    }
 
     public function reviewManualPayoutEvidence(Request $request, int $payoutId): JsonResponse
     {
