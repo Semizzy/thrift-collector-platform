@@ -195,5 +195,31 @@ class PaymentWorkflowController extends Controller
             ]);
             return response()->json(['data' => $payout, 'message' => 'Manual payment evidence recorded for reconciliation. This is not provider-verified proof of payment and does not debit a ledger.']);
         });
+
+    public function reviewManualPayoutEvidence(Request $request, int $payoutId): JsonResponse
+    {
+        $business = $request->attributes->get('current_business');
+        $data = $request->validate([
+            'decision' => ['required', Rule::in(['accept_evidence', 'reject_evidence'])],
+            'reason' => ['required', 'string', 'min:8', 'max:500'],
+        ]);
+        return DB::transaction(function () use ($request, $business, $payoutId, $data): JsonResponse {
+            $payout = PayoutRequest::query()->where('business_id', $business->id)->whereKey($payoutId)->lockForUpdate()->firstOrFail();
+            if ($payout->status !== 'manual_payment_evidence_submitted') {
+                return response()->json(['message' => 'No submitted manual payout evidence is awaiting review.'], 409);
+            }
+            if (in_array($request->user()->id, [$payout->user_id, $payout->approved_by_user_id, $payout->paid_confirmed_by_user_id], true)) {
+                return response()->json(['message' => 'The requester, approver, and evidence submitter must not review the evidence.'], 403);
+            }
+            $status = $data['decision'] === 'accept_evidence' ? 'manual_evidence_accepted_unsettled' : 'manual_evidence_rejected';
+            $payout->forceFill(['status' => $status, 'decision_reason' => trim($data['reason'])])->save();
+            PaymentOperationEvent::query()->create([
+                'business_id' => $business->id, 'operation_type' => 'payout', 'operation_id' => $payout->id,
+                'actor_user_id' => $request->user()->id, 'event' => $status,
+                'reason' => trim($data['reason']), 'evidence' => ['provider_verified' => false, 'ledger_debit_posted' => false], 'created_at' => now(),
+            ]);
+            return response()->json(['data' => $payout, 'message' => 'Evidence review recorded. Even accepted manual evidence is not provider verification, settlement proof, or a ledger posting.']);
+        });
+    }
     }
 }
