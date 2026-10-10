@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\BusinessMembership;
 use App\Models\ContributionRecord;
+use App\Models\ContributionCycleObligation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -40,6 +41,31 @@ class DashboardController extends Controller
                 'records_count' => (int) $row->records_count,
             ])->values();
 
+        $upcomingObligationsQuery = ContributionCycleObligation::query()
+            ->where('user_id', $user->id)->where('status', 'due')
+            ->whereHas('cycle', fn ($query) => $query->where('status', 'scheduled')
+                ->whereDate('due_on', '>=', now()->toDateString())
+                ->whereHas('group', fn ($groupQuery) => $groupQuery->where('status', 'active')
+                    ->whereHas('memberships', fn ($membershipQuery) => $membershipQuery
+                        ->where('user_id', $user->id)->where('status', 'active'))));
+        $upcomingObligationsCount = (clone $upcomingObligationsQuery)->count();
+        $upcomingObligations = $upcomingObligationsQuery->with([
+            'cycle:id,thrift_group_id,due_on,expected_amount_minor,currency_code,status',
+            'cycle.group:id,name,currency_code',
+        ])->orderBy('id')->limit(10)->get([
+            'id', 'contribution_cycle_id', 'user_id', 'expected_amount_minor', 'currency_code', 'status',
+        ])->map(static fn ($obligation): array => [
+            'id' => $obligation->id,
+            'status' => $obligation->status,
+            'expected_amount_minor' => $obligation->expected_amount_minor,
+            'currency_code' => $obligation->currency_code,
+            'due_on' => $obligation->cycle?->due_on?->toDateString(),
+            'group' => $obligation->cycle?->group ? [
+                'id' => $obligation->cycle->group->id,
+                'name' => $obligation->cycle->group->name,
+            ] : null,
+        ])->values();
+
         return response()->json(['data' => [
             'user' => $user->only(['id', 'name', 'email', 'email_verified_at', 'created_at']),
             'active_workspaces_count' => $memberships->count(),
@@ -57,6 +83,8 @@ class DashboardController extends Controller
             ])->values(),
             'confirmed_contribution_totals' => $confirmedTotals,
             'recent_contributions' => $recentContributions,
+            'upcoming_obligations_count' => $upcomingObligationsCount,
+            'upcoming_obligations' => $upcomingObligations,
             'financial_data_status' => 'recorded_contributions_only',
             'message' => 'Confirmed contribution records are not proof of bank deposit, payment-provider settlement, or payout.',
         ]]);
