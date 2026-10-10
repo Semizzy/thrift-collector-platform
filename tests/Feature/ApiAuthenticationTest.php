@@ -124,14 +124,14 @@ final class ApiAuthenticationTest extends TestCase
             'name' => 'Business Owner',
             'email' => 'owner@example.test',
             'password' => 'a-strong-test-password',
-            'email_verified_at' => now(),
         ]);
+        $owner->forceFill(['email_verified_at' => now()])->save();
         $other = User::query()->create([
             'name' => 'Other Owner',
             'email' => 'other@example.test',
             'password' => 'a-strong-test-password',
-            'email_verified_at' => now(),
         ]);
+        $other->forceFill(['email_verified_at' => now()])->save();
         $token = str_repeat('a', 64);
         PersonalAccessToken::query()->create([
             'user_id' => $owner->id,
@@ -185,14 +185,14 @@ final class ApiAuthenticationTest extends TestCase
             'name' => 'Owner',
             'email' => 'owner2@example.test',
             'password' => 'a-strong-test-password',
-            'email_verified_at' => now(),
         ]);
+        $owner->forceFill(['email_verified_at' => now()])->save();
         $contributor = User::query()->create([
             'name' => 'Contributor',
             'email' => 'contributor@example.test',
             'password' => 'a-strong-test-password',
-            'email_verified_at' => now(),
         ]);
+        $contributor->forceFill(['email_verified_at' => now()])->save();
         $business = Business::query()->create([
             'name' => 'Role Test Business',
             'slug' => 'role-test-business',
