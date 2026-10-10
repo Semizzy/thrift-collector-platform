@@ -38,6 +38,34 @@ class PaymentWorkflowController extends Controller
         return response()->json(['data' => $catalogue, 'message' => 'Provider adapters are not enabled for live execution in this release.']);
     }
 
+    public function configureGateway(Request $request, string $provider, string $direction): JsonResponse
+    {
+        $business = $request->attributes->get('current_business');
+        abort_unless(in_array($provider, self::PROVIDERS, true) && in_array($direction, ['deposit', 'payout'], true), 404);
+        $data = $request->validate([
+            'public_config' => ['sometimes', 'array'],
+            'credentials' => ['sometimes', 'array'],
+        ]);
+        if ($provider !== 'manual' && empty($data['credentials'])) {
+            return response()->json(['message' => 'Provide provider credentials to store an encrypted, disabled configuration.'], 422);
+        }
+        $config = PaymentGatewayConfig::query()->updateOrCreate(
+            ['business_id' => $business->id, 'provider' => $provider, 'direction' => $direction],
+            ['status' => 'disabled', 'public_config' => $data['public_config'] ?? [],
+                'credentials_ciphertext' => isset($data['credentials']) ? json_encode($data['credentials'], JSON_THROW_ON_ERROR) : null,
+                'updated_by_user_id' => $request->user()->id]
+        );
+        PaymentOperationEvent::query()->create([
+            'business_id' => $business->id, 'operation_type' => 'gateway_config', 'operation_id' => $config->id,
+            'actor_user_id' => $request->user()->id, 'event' => 'gateway_configured_disabled',
+            'reason' => 'Configuration stored; provider remains disabled until independent release approval.',
+            'evidence' => ['provider' => $provider, 'direction' => $direction, 'credentials_supplied' => ! empty($data['credentials'])],
+            'created_at' => now(),
+        ]);
+        return response()->json(['data' => ['provider' => $provider, 'direction' => $direction, 'status' => 'disabled', 'configured' => true],
+            'message' => 'Configuration saved encrypted. It remains disabled; this endpoint does not test credentials or enable live execution.']);
+    }
+
     public function deposits(Request $request): JsonResponse
     {
         $business = $request->attributes->get('current_business');
