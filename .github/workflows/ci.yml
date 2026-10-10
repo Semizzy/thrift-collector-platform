@@ -15,6 +15,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  frontend-build:
+    name: Frontend typecheck and production build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install frontend dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck and build frontend
+        run: npm run build
+
+      - name: Verify built application entry point
+        run: test -s public/app/index.html
+
+      - name: Upload cPanel-ready frontend assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: thrift-collector-frontend
+          path: public/app/
+          if-no-files-found: error
+          retention-days: 14
+
   domain-tests:
     name: PHP domain and application checks
     runs-on: ubuntu-latest
