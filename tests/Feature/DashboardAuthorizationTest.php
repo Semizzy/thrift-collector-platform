@@ -48,7 +48,7 @@ final class DashboardAuthorizationTest extends TestCase
             ->assertJsonPath('data.user.id', $user->id)
             ->assertJsonPath('data.active_workspaces_count', 1)
             ->assertJsonPath('data.workspaces.0.name', 'Member Workspace')
-            ->assertJsonPath('data.financial_data_status', 'not_available');
+            ->assertJsonPath('data.financial_data_status', 'recorded_contributions_only');
     }
 
     public function test_dashboard_summary_requires_authentication(): void
