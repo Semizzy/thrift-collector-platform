@@ -69,7 +69,7 @@ class PaymentWorkflowController extends Controller
             if ($deposit->user_id !== $request->user()->id || $deposit->amount_minor !== (int) $data['amount_minor'] || $deposit->currency_code !== $data['currency_code']) {
                 abort(409, 'Idempotency reference was already used with different deposit details.');
             }
-            PaymentOperationEvent::query()->create([
+            if ($deposit->wasRecentlyCreated) PaymentOperationEvent::query()->create([
                 'business_id' => $business->id, 'operation_type' => 'deposit', 'operation_id' => $deposit->id,
                 'actor_user_id' => $request->user()->id, 'event' => 'manual_deposit_submitted',
                 'reason' => 'Submitted for independent review; this does not credit a balance.',
@@ -137,7 +137,7 @@ class PaymentWorkflowController extends Controller
             if ($payout->user_id !== $request->user()->id || $payout->amount_minor !== (int) $data['amount_minor'] || $payout->currency_code !== $data['currency_code']) {
                 abort(409, 'Idempotency reference was already used with different payout details.');
             }
-            PaymentOperationEvent::query()->create([
+            if ($payout->wasRecentlyCreated) PaymentOperationEvent::query()->create([
                 'business_id' => $business->id, 'operation_type' => 'payout', 'operation_id' => $payout->id,
                 'actor_user_id' => $request->user()->id, 'event' => 'payout_requested',
                 'reason' => 'Request recorded; no funds were reserved or transferred.', 'evidence' => ['provider' => 'manual'], 'created_at' => now(),
