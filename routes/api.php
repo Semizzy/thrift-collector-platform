@@ -27,6 +27,13 @@ Route::prefix('v1')->group(function (): void {
         ),
     ]));
 
+    Route::middleware(AuthenticateApiToken::class)->group(function (): void {
+        Route::get('/dashboard/summary', [DashboardController::class, 'summary']);
+        Route::middleware(RequirePlatformAdmin::class)->prefix('admin')->group(function (): void {
+            Route::get('/dashboard', [AdminDashboardController::class, 'summary']);
+        });
+    });
+
     Route::prefix('auth')->group(function (): void {
         Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:5,1');
         Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
@@ -40,10 +47,6 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/me', [AuthController::class, 'me']);
             Route::post('/logout', [AuthController::class, 'logout']);
             Route::post('/email/verification-notification', [AuthController::class, 'resendVerification'])->middleware('throttle:3,1');
-            Route::get('/dashboard/summary', [DashboardController::class, 'summary']);
-            Route::middleware(RequirePlatformAdmin::class)->prefix('admin')->group(function (): void {
-                Route::get('/dashboard', [AdminDashboardController::class, 'summary']);
-            });
         });
     });
 
