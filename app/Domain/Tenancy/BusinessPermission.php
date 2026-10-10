@@ -28,7 +28,7 @@ enum BusinessPermission: string
             ],
             'field_agent' => [self::ViewMembers->value, self::ViewArrangements->value, self::RecordContributions->value],
             'group_organizer' => [self::ViewMembers->value, self::ViewArrangements->value, self::ViewReports->value],
-            'auditor' => [self::ViewMembers->value, self::ViewArrangements->value, self::ViewReports->value, self::ReviewDisputes->value, self::ManageReconciliation->value, self::ManagePayments->value],
+            'auditor' => [self::ViewMembers->value, self::ViewArrangements->value, self::ViewReports->value, self::ReviewDisputes->value, self::ManageReconciliation->value],
             'contributor' => [self::ViewArrangements->value],
             default => [],
         };
