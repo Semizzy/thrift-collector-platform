@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\V1\ReconciliationController;
 use App\Http\Controllers\Api\V1\PaymentWorkflowController;
 use App\Http\Controllers\Api\V1\BankAccountVerificationController;
 use App\Http\Controllers\Api\V1\UserDepositAccountController;
+use App\Http\Controllers\Api\V1\PaystackWebhookController;
 use App\Http\Controllers\Api\V1\PlatformAdminController;
 use App\Http\Middleware\AuthenticateApiToken;
 use App\Http\Middleware\EnsureVerifiedEmail;
