@@ -178,7 +178,7 @@ class WalletLedgerService
             // the winning transaction. Treat only an exact matching journal as a replay.
             $existing = DB::table('wallet_ledger_transactions')->where('business_id', $businessId)
                 ->where('idempotency_key', $idempotencyKey)->first();
-            if ($existing && $this->existingPostingMatches($existing, $businessId, $currency, $sourceType, $sourceId, $lines)) {
+            if ($existing && $this->existingPostingMatches($existing, $businessId, $currency, $sourceType, $sourceId, $lines, $metadata)) {
                 return ['status' => 'already_posted', 'transaction_id' => $existing->id];
             }
             throw $exception;
