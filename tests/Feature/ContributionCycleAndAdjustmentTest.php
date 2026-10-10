@@ -125,6 +125,21 @@ final class ContributionCycleAndAdjustmentTest extends TestCase
                 'decision' => 'approved', 'decision_note' => 'Reviewed the evidence independently and approved the request.',
             ])->assertForbidden();
 
+        $outsider = User::query()->create([
+            'name' => 'Business Manager Outside Group', 'email' => 'outsider@example.test',
+            'password' => 'a-strong-test-password',
+        ]);
+        $outsider->forceFill(['email_verified_at' => now()])->save();
+        BusinessMembership::query()->create([
+            'business_id' => $business->id, 'user_id' => $outsider->id,
+            'role' => 'business_manager', 'status' => 'active', 'joined_at' => now(),
+        ]);
+        $outsiderToken = $this->token($outsider, str_repeat('h', 64));
+        $this->withToken($outsiderToken)->withHeader('X-Business-Id', (string) $business->id)
+            ->postJson('/api/v1/business/groups/'.$group->id.'/adjustments/'.$adjustment->id.'/decide', [
+                'decision' => 'approved', 'decision_note' => 'Attempt to decide outside the group membership boundary.',
+            ])->assertForbidden();
+
         $this->withToken($reviewerToken)->withHeader('X-Business-Id', (string) $business->id)
             ->postJson('/api/v1/business/groups/'.$group->id.'/adjustments/'.$adjustment->id.'/decide', [
                 'decision' => 'approved', 'decision_note' => 'Reviewed the evidence independently and approved the request.',
