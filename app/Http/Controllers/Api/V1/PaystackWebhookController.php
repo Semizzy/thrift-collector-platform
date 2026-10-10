@@ -53,7 +53,7 @@ class PaystackWebhookController extends Controller
         $objectId = isset($data['id']) ? (string) $data['id'] : null;
         $transactionRef = isset($data['reference']) ? (string) $data['reference'] : '';
         $eventKey = hash('sha256', implode('|', [
-            'paystack', $eventType, $objectId ?? '', $transactionRef,
+            'paystack', (string) $matchedBusinessId, $eventType, $objectId ?? '', $transactionRef,
             (string) ($data['status'] ?? ''), (string) ($data['customer']['customer_code'] ?? $data['customer_code'] ?? ''),
         ]));
         $payloadHash = hash('sha256', $raw);
@@ -85,7 +85,7 @@ class PaystackWebhookController extends Controller
             }
             $customer = (array) ($data['customer'] ?? []);
             $customerCode = (string) ($customer['customer_code'] ?? $data['customer_code'] ?? '');
-            $accountId = isset($accountData['id']) ? (string) $accountData['id'] : (isset($data['dedicated_account_id']) ? (string) $data['dedicated_account_id'] : '');
+            $accountId = isset($accountData['id']) ? (string) $accountData['id'] : (isset($data['dedicated_account_id']) ? (string) $data['dedicated_account_id'] : (isset($data['id']) ? (string) $data['id'] : ''));
             $accountNumber = (string) ($accountData['account_number'] ?? '');
             $accountName = (string) ($accountData['account_name'] ?? '');
             $bank = (array) ($accountData['bank'] ?? $data['bank'] ?? []);
@@ -139,7 +139,7 @@ class PaystackWebhookController extends Controller
                 $currency = strtoupper((string) ($data['currency'] ?? ''));
                 if ($transactionId && $amount !== false && $amount > 0 && preg_match('/^[A-Z]{3}$/', $currency)) {
                     $deposit = ProviderDepositEvent::query()->firstOrCreate(
-                        ['provider' => 'paystack', 'provider_transaction_id' => $transactionId],
+                        ['business_id' => $matchedBusinessId, 'provider' => 'paystack', 'provider_transaction_id' => $transactionId],
                         [
                             'business_id' => $matchedBusinessId, 'user_id' => $account?->user_id,
                             'user_deposit_account_id' => $account?->id, 'provider_reference' => $transactionRef ?: null,
