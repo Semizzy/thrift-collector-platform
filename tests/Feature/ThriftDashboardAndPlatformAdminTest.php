@@ -6,7 +6,6 @@ use App\Models\Business;
 use App\Models\BusinessMembership;
 use App\Models\ContributionRecord;
 use App\Models\PersonalAccessToken;
-use App\Models\PlatformAuditEvent;
 use App\Models\ThriftGroup;
 use App\Models\ThriftGroupMembership;
 use App\Models\User;
