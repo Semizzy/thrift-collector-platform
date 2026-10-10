@@ -94,15 +94,26 @@ class DepositAccountOperationsController extends Controller
                 return response()->json(['data' => ['id' => $existing->id, 'status' => $existing->status], 'message' => 'An escalation already exists for this account.'], 200);
             }
 
+            $diagnosticCode = $account->recovery_attempts >= 12 ? 'retry_limit_reached' : ($account->last_recovery_result ?? 'assignment_not_confirmed');
             $id = DB::table('deposit_account_escalations')->insertGetId([
                 'business_id' => $business->id,
                 'user_deposit_account_id' => $account->id,
                 'requested_by_user_id' => $request->user()->id,
                 'reason' => trim($data['reason']),
                 'status' => 'open',
-                'diagnostic_code' => $account->recovery_attempts >= 12 ? 'retry_limit_reached' : ($account->last_recovery_result ?? 'assignment_not_confirmed'),
+                'diagnostic_code' => $diagnosticCode,
                 'created_at' => now(),
                 'updated_at' => now(),
+            ]);
+            DB::table('payment_operation_events')->insert([
+                'business_id' => $business->id,
+                'operation_type' => 'user_deposit_account',
+                'operation_id' => $account->id,
+                'actor_user_id' => $request->user()->id,
+                'event' => 'deposit_account_escalated',
+                'reason' => trim($data['reason']),
+                'evidence' => json_encode(['escalation_id' => $id, 'diagnostic_code' => $diagnosticCode, 'financial_posting' => false], JSON_THROW_ON_ERROR),
+                'created_at' => now(),
             ]);
 
             return response()->json([
