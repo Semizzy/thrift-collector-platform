@@ -58,8 +58,8 @@ class UserDepositAccountController extends Controller
     {
         $business = $request->attributes->get('current_business');
         $config = $this->credentials((int) $business->id);
-        if (! $config) {
-            return response()->json(['message' => 'Dedicated deposit accounts require administrator-configured Paystack credentials.'], 503);
+        if (! $config || ($config['public_config']['virtual_accounts_enabled'] ?? false) !== true) {
+            return response()->json(['message' => 'Dedicated deposit accounts are unavailable until an administrator explicitly enables virtual-account provisioning.'], 503);
         }
         try {
             $response = Http::acceptJson()->withToken($config['secret_key'])->timeout(8)
