@@ -133,7 +133,7 @@ class PaystackWebhookController extends Controller
                     PaymentOperationEvent::query()->create([
                         'business_id' => $matchedBusinessId, 'operation_type' => 'user_deposit_account',
                         'operation_id' => $account->id, 'actor_user_id' => null,
-                        'event' => $failed ? 'dedicated_account_assignment_failed_webhook' : 'dedicated_account_assignment_confirmed_webhook',
+                        'event' => $failed ? 'dva_assign_failed_hook' : 'dva_assign_confirmed_hook',
                         'reason' => 'Signed provider assignment webhook processed; no balance or ledger credit was posted.',
                         'evidence' => ['provider' => 'paystack', 'provider_event' => $eventType, 'provider_object_id' => $objectId],
                         'created_at' => now(),
@@ -167,7 +167,7 @@ class PaystackWebhookController extends Controller
                     PaymentOperationEvent::query()->create([
                         'business_id' => $matchedBusinessId, 'operation_type' => 'provider_deposit_event',
                         'operation_id' => $deposit->id, 'actor_user_id' => null,
-                        'event' => $deposit->wasRecentlyCreated ? 'provider_deposit_received_for_reconciliation' : 'provider_deposit_duplicate_webhook',
+                        'event' => $deposit->wasRecentlyCreated ? 'provider_deposit_received_review' : 'provider_deposit_duplicate_hook',
                         'reason' => 'Signed provider charge event stored as reconciliation evidence only; no contribution, wallet or ledger credit was posted.',
                         'evidence' => ['provider' => 'paystack', 'transaction_id' => $transactionId, 'amount_minor' => $amount, 'currency_code' => $currency, 'account_matched' => (bool) $account],
                         'created_at' => now(),
@@ -222,7 +222,7 @@ class PaystackWebhookController extends Controller
             PaymentOperationEvent::query()->create([
                 'business_id' => $business->id, 'operation_type' => 'provider_deposit_event',
                 'operation_id' => $deposit->id, 'actor_user_id' => $request->user()->id,
-                'event' => 'provider_deposit_reconciliation_'.$data['decision'],
+                'event' => 'deposit_reconcile_'.$data['decision'],
                 'reason' => trim($data['reason']),
                 'evidence' => [
                     'provider' => $deposit->provider, 'provider_transaction_id' => $deposit->provider_transaction_id,
