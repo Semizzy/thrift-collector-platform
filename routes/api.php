@@ -54,6 +54,10 @@ Route::prefix('v1')->group(function (): void {
                 ->middleware(RequirePlatformPermission::class.':platform.admins.manage');
             Route::get('/audit-events', [PlatformAdminController::class, 'auditEvents'])
                 ->middleware(RequirePlatformPermission::class.':platform.audit.view');
+            Route::get('/security-settings', [PlatformAdminController::class, 'securitySettings'])
+                ->middleware(RequirePlatformPermission::class.':platform.security.manage');
+            Route::put('/security-settings', [PlatformAdminController::class, 'updateSecuritySettings'])
+                ->middleware(RequirePlatformPermission::class.':platform.security.manage');
         });
     });
 
