@@ -205,14 +205,14 @@ class PaymentWorkflowController extends Controller
         return response()->json(['data' => $payout, 'wallet_debit' => $walletPosting, 'message' => $payout->wasRecentlyCreated ? 'Withdrawal requested and deducted from your wallet. It awaits independent approval; no bank transfer has been initiated.' : 'This withdrawal request already exists; the wallet was not debited a second time.'], $payout->wasRecentlyCreated ? 201 : 200);
     }
 
-    public function decidePayout(Request $request, int $payoutId): JsonResponse
+    public function decidePayout(Request $request, int $payoutId, WalletLedgerService $ledger): JsonResponse
     {
         $business = $request->attributes->get('current_business');
         $data = $request->validate([
             'decision' => ['required', Rule::in(['approve', 'reject'])],
             'reason' => ['required', 'string', 'min:8', 'max:500'],
         ]);
-        return DB::transaction(function () use ($request, $business, $payoutId, $data): JsonResponse {
+        return DB::transaction(function () use ($request, $business, $payoutId, $data, $ledger): JsonResponse {
             $payout = PayoutRequest::query()->where('business_id', $business->id)->whereKey($payoutId)->lockForUpdate()->firstOrFail();
             if ($payout->user_id === $request->user()->id) {
                 return response()->json(['message' => 'The requester cannot approve their own payout.'], 403);
@@ -221,14 +221,22 @@ class PaymentWorkflowController extends Controller
                 return response()->json(['message' => 'Only a pending payout request can be decided.'], 409);
             }
             $status = $data['decision'] === 'approve' ? 'approved_manual_execution_pending' : 'rejected';
+            $walletRefund = ['status' => 'not_required', 'transaction_id' => null];
+            if ($data['decision'] === 'reject' && $ledger->hasWithdrawalDebit((int) $business->id, (int) $payout->id)) {
+                $walletRefund = $ledger->refundWithdrawal(
+                    (int) $business->id, (int) $payout->user_id, $payout->currency_code,
+                    (int) $payout->amount_minor, (int) $payout->id, (int) $request->user()->id,
+                    trim($data['reason'])
+                );
+            }
             $payout->forceFill(['status' => $status, 'approved_by_user_id' => $request->user()->id,
                 'decision_reason' => trim($data['reason']), 'approved_at' => now()])->save();
             PaymentOperationEvent::query()->create([
                 'business_id' => $business->id, 'operation_type' => 'payout', 'operation_id' => $payout->id,
                 'actor_user_id' => $request->user()->id, 'event' => 'payout_'.$status,
-                'reason' => trim($data['reason']), 'evidence' => ['transfer_executed' => false], 'created_at' => now(),
+                'reason' => trim($data['reason']), 'evidence' => ['transfer_executed' => false, 'wallet_refund' => $walletRefund], 'created_at' => now(),
             ]);
-            return response()->json(['data' => $payout, 'message' => 'Decision recorded. Approval is not proof of payment and does not transfer funds.']);
+            return response()->json(['data' => $payout, 'wallet_refund' => $walletRefund, 'message' => $data['decision'] === 'reject' ? 'Withdrawal rejected. Any reserved wallet amount has been refunded exactly once.' : 'Withdrawal approved for manual execution. The wallet remains debited; approval is not proof of payment.']);
         });
     }
 
