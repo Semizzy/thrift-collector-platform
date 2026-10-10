@@ -13,6 +13,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
 final class PaymentWorkflowTest extends TestCase
@@ -23,9 +24,9 @@ final class PaymentWorkflowTest extends TestCase
     {
         $this->seed();
         $owner = User::query()->create(['name' => 'Payments Owner', 'email' => 'payments-owner@example.test', 'password' => 'strong-test-password']);
-        $owner->forceFill(['email_verified_at' => now()])->save();
+        $owner->forceFill(['email_verified_at' => now(), 'transaction_pin_hash' => Hash::make('2468')])->save();
         $reviewer = User::query()->create(['name' => 'Payments Reviewer', 'email' => 'payments-reviewer@example.test', 'password' => 'strong-test-password']);
-        $reviewer->forceFill(['email_verified_at' => now()])->save();
+        $reviewer->forceFill(['email_verified_at' => now(), 'transaction_pin_hash' => Hash::make('2468')])->save();
         $business = Business::query()->create([
             'name' => 'Payments Business', 'slug' => 'payments-business', 'country_code' => 'NG',
             'status' => 'active', 'created_by_user_id' => $owner->id,
@@ -57,7 +58,7 @@ final class PaymentWorkflowTest extends TestCase
             ->assertJsonPath('data.0.status', 'disabled')
             ->assertJsonPath('data.0.ready_for_live_execution', false);
 
-        $payload = ['provider' => 'manual', 'amount_minor' => 12500, 'currency_code' => 'NGN', 'client_reference' => 'DEP-001'];
+        $payload = ['provider' => 'manual', 'amount_minor' => 12500, 'currency_code' => 'NGN', 'client_reference' => 'DEP-001', 'transaction_pin' => '2468', 'purpose' => 'Monthly thrift contribution'];
         $this->withToken($tokens[$owner->id])->withHeader('X-Business-Id', (string) $business->id)
             ->postJson('/api/v1/business/payments/deposits', $payload)->assertCreated()
             ->assertJsonPath('data.status', 'pending_review');
@@ -84,6 +85,7 @@ final class PaymentWorkflowTest extends TestCase
                 'account_name_ciphertext' => 'TEST ACCOUNT HOLDER', 'status' => 'verified',
                 'verified_at' => now(), 'expires_at' => now()->addMinutes(10),
             ])->id,
+            'transaction_pin' => '2468', 'purpose' => 'Emergency family expense',
         ];
         $created = $this->withToken($tokens[$owner->id])->withHeaders($headers)
             ->postJson('/api/v1/business/payments/payouts', $payload)->assertCreated()
@@ -211,7 +213,7 @@ final class PaymentWorkflowTest extends TestCase
         [$owner, , $business, $tokens] = $this->fixture();
         $this->withToken($tokens[$owner->id])->withHeader('X-Business-Id', (string) $business->id)
             ->postJson('/api/v1/business/payments/deposits', [
-                'provider' => 'paystack', 'amount_minor' => 10000, 'currency_code' => 'NGN', 'client_reference' => 'PAYSTACK-001',
+                'provider' => 'paystack', 'amount_minor' => 10000, 'currency_code' => 'NGN', 'client_reference' => 'PAYSTACK-001', 'transaction_pin' => '2468', 'purpose' => 'Test disabled provider gate',
             ])->assertStatus(503);
         $this->assertDatabaseCount('deposit_intents', 0);
     }
