@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\V1\UserDepositAccountController;
 use App\Http\Controllers\Api\V1\PaystackWebhookController;
 use App\Http\Controllers\Api\V1\DepositAccountOperationsController;
 use App\Http\Controllers\Api\V1\TransactionPinController;
+use App\Http\Controllers\Api\V1\WalletController;
 use App\Http\Middleware\EnsureTransactionPin;
 use App\Http\Controllers\Api\V1\PlatformAdminController;
 use App\Http\Middleware\AuthenticateApiToken;
@@ -110,6 +111,8 @@ Route::prefix('v1')->group(function (): void {
                 ->middleware(['throttle:10,1', EnsureTransactionPin::class]);
             Route::post('/payments/deposits/{depositId}/review', [PaymentWorkflowController::class, 'reviewDeposit'])
                 ->whereNumber('depositId')->middleware(RequireBusinessPermission::class.':payments.manage');
+            Route::get('/wallet', [WalletController::class, 'show']);
+            Route::get('/wallet/ledger', [WalletController::class, 'entries']);
             Route::get('/payments/payouts', [PaymentWorkflowController::class, 'payouts']);
             Route::post('/payments/payouts', [PaymentWorkflowController::class, 'createPayout'])
                 ->middleware(['throttle:5,1', EnsureTransactionPin::class]);
@@ -119,6 +122,10 @@ Route::prefix('v1')->group(function (): void {
                 ->whereNumber('payoutId')->middleware(RequireBusinessPermission::class.':payments.manage');
             Route::post('/payments/payouts/{payoutId}/manual-payment-evidence/review', [PaymentWorkflowController::class, 'reviewManualPayoutEvidence'])
                 ->whereNumber('payoutId')->middleware(RequireBusinessPermission::class.':payments.manage');
+            Route::post('/payments/payouts/{payoutId}/settle', [PaymentWorkflowController::class, 'settleManualPayout'])
+                ->whereNumber('payoutId')->middleware(RequireBusinessPermission::class.':reconciliation.manage');
+            Route::post('/payments/payouts/{payoutId}/fail', [PaymentWorkflowController::class, 'failManualPayout'])
+                ->whereNumber('payoutId')->middleware(RequireBusinessPermission::class.':reconciliation.manage');
             Route::get('/reconciliation/batches', [ReconciliationController::class, 'index'])
                 ->middleware(RequireBusinessPermission::class.':reconciliation.manage');
             Route::post('/reconciliation/batches', [ReconciliationController::class, 'store'])
