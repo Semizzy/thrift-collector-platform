@@ -30,7 +30,7 @@ return new class extends Migration {
             $table->foreignId('user_id')->nullable()->constrained('users')->nullOnDelete();
             $table->foreignId('user_deposit_account_id')->nullable()->constrained('user_deposit_accounts')->nullOnDelete();
             $table->string('provider', 32);
-            $table->string('provider_transaction_id', 160);
+            $table->string('provider_transaction_id', 120);
             $table->string('provider_reference', 160)->nullable();
             $table->unsignedBigInteger('amount_minor');
             $table->char('currency_code', 3);
@@ -43,7 +43,7 @@ return new class extends Migration {
             $table->string('review_reason', 500)->nullable();
             $table->timestamp('reviewed_at')->nullable();
             $table->timestamps();
-            $table->unique(['provider', 'provider_transaction_id'], 'provider_deposit_transaction_unique');
+            $table->unique(['business_id', 'provider', 'provider_transaction_id'], 'provider_deposit_transaction_unique');
             $table->index(['business_id', 'status', 'created_at'], 'provider_deposit_review_idx');
         });
     }
