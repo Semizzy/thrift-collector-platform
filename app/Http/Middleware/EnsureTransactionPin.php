@@ -27,6 +27,10 @@ class EnsureTransactionPin
             if ($lockedUser->transaction_pin_locked_until && $lockedUser->transaction_pin_locked_until->isFuture()) {
                 return ['status' => 'locked', 'until' => $lockedUser->transaction_pin_locked_until->toIso8601String()];
             }
+            if ($lockedUser->transaction_pin_locked_until && ! $lockedUser->transaction_pin_locked_until->isFuture()) {
+                $lockedUser->forceFill(['transaction_pin_failed_attempts' => 0, 'transaction_pin_locked_until' => null])->save();
+                $lockedUser->refresh();
+            }
 
             if (! Hash::check($data['transaction_pin'], $lockedUser->transaction_pin_hash)) {
                 $attempts = min(3, (int) $lockedUser->transaction_pin_failed_attempts + 1);
