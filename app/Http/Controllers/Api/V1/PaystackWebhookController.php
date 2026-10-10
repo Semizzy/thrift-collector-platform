@@ -89,21 +89,29 @@ class PaystackWebhookController extends Controller
             $accountNumber = (string) ($accountData['account_number'] ?? '');
             $accountName = (string) ($accountData['account_name'] ?? '');
             $bank = (array) ($accountData['bank'] ?? $data['bank'] ?? []);
-            $accountQuery = UserDepositAccount::query()->where('business_id', $matchedBusinessId)->where('provider', 'paystack');
+            $baseAccountQuery = UserDepositAccount::query()
+                ->where('business_id', $matchedBusinessId)->where('provider', 'paystack');
+            $account = null;
             if ($accountId !== '') {
-                $accountQuery->where(function ($query) use ($accountId, $customerCode, $accountNumber): void {
-                    $query->where('provider_account_id', $accountId);
-                    if ($customerCode !== '') $query->orWhere('provider_customer_id', $customerCode);
-                    if ($accountNumber !== '') $query->orWhere('account_number_hash', hash('sha256', $accountNumber));
-                });
-            } elseif ($customerCode !== '') {
-                $accountQuery->where('provider_customer_id', $customerCode);
-            } elseif ($accountNumber !== '') {
-                $accountQuery->where('account_number_hash', hash('sha256', $accountNumber));
-            } else {
-                $accountQuery = null;
+                $account = (clone $baseAccountQuery)->where('provider_account_id', $accountId)->lockForUpdate()->first();
             }
-            $account = $accountQuery?->lockForUpdate()->first();
+            if (! $account && $accountNumber !== '') {
+                $account = (clone $baseAccountQuery)->where('account_number_hash', hash('sha256', $accountNumber))->lockForUpdate()->first();
+            }
+            if (! $account && $customerCode !== '') {
+                $candidateQuery = (clone $baseAccountQuery)->where('provider_customer_id', $customerCode);
+                if (in_array($eventType, ['dedicated_account.assign.success', 'dedicated_account.assign.failed', 'dedicated_account.assign.failure'], true)) {
+                    $candidateQuery->where('status', 'provisioning');
+                    if (! empty($bank['slug'])) $candidateQuery->where('bank_code', (string) $bank['slug']);
+                    elseif (! empty($bank['name'])) $candidateQuery->where('bank_name', (string) $bank['name']);
+                } elseif ($eventType === 'charge.success') {
+                    $candidateQuery->where('status', 'active');
+                }
+                $candidates = $candidateQuery->lockForUpdate()->limit(2)->get();
+                if ($candidates->count() === 1) {
+                    $account = $candidates->first();
+                }
+            }
 
             if (in_array($eventType, ['dedicated_account.assign.success', 'dedicated_account.assign.failed', 'dedicated_account.assign.failure'], true)) {
                 if ($account) {
