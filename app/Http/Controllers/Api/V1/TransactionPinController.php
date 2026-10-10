@@ -97,8 +97,12 @@ class TransactionPinController extends Controller
             return response()->json(['message' => 'Choose a less predictable four-digit PIN.'], 422);
         }
 
-        DB::table('transaction_pin_challenges')->where('id', $challenge->id)
-            ->whereNull('consumed_at')->update(['consumed_at' => now(), 'updated_at' => now()]);
+        $consumed = DB::table('transaction_pin_challenges')->where('id', $challenge->id)
+            ->whereNull('consumed_at')->where('expires_at', '>', now())->where('attempts', '<', 5)
+            ->update(['consumed_at' => now(), 'updated_at' => now()]);
+        if ($consumed !== 1) {
+            return response()->json(['message' => 'This verification code has already been used or expired. Request a new code.'], 422);
+        }
         $user->forceFill([
             'transaction_pin_hash' => Hash::make($data['pin']),
             'transaction_pin_set_at' => now(),
