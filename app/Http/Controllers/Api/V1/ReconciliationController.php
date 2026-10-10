@@ -8,6 +8,7 @@ use App\Models\ContributionRecord;
 use App\Models\ReconciliationBatch;
 use App\Models\ReconciliationEntry;
 use App\Models\ThriftGroup;
+use App\Services\WalletLedgerService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -81,7 +82,7 @@ class ReconciliationController extends Controller
         return response()->json(['data' => $batch->load('entries'), 'replayed' => false], 201);
     }
 
-    public function match(Request $request, int $entryId): JsonResponse
+    public function match(Request $request, int $entryId, WalletLedgerService $ledger): JsonResponse
     {
         $business = $request->attributes->get('current_business');
         $data = $request->validate([
@@ -90,7 +91,7 @@ class ReconciliationController extends Controller
             'reason' => ['required', 'string', 'min:8', 'max:500'],
         ]);
 
-        return DB::transaction(function () use ($request, $business, $entryId, $data): JsonResponse {
+        return DB::transaction(function () use ($request, $business, $entryId, $data, $ledger): JsonResponse {
             $entry = ReconciliationEntry::query()->whereKey($entryId)
                 ->whereHas('batch', fn ($query) => $query->where('business_id', $business->id))
                 ->lockForUpdate()->firstOrFail();
@@ -130,23 +131,28 @@ class ReconciliationController extends Controller
                     return response()->json(['message' => 'This contribution is already matched to another statement entry. Review as duplicate/conflict.'], 409);
                 }
                 $entry->forceFill(['status' => 'matched', 'matched_contribution_record_id' => $contribution->id])->save();
+                $walletPosting = $ledger->creditContribution(
+                    (int) $business->id, (int) $contribution->user_id, $contribution->currency_code,
+                    (int) $contribution->amount_minor, (int) $contribution->id, (int) $request->user()->id
+                );
             } else {
                 $entry->forceFill(['status' => $data['decision'], 'matched_contribution_record_id' => null])->save();
             }
 
+            $walletPosting ??= ['status' => 'not_posted', 'reason' => 'No contribution was matched.'];
             DB::table('reconciliation_decisions')->insert([
                 'business_id' => $business->id, 'reconciliation_entry_id' => $entry->id,
                 'actor_user_id' => $request->user()->id, 'decision' => $data['decision'],
-                'reason' => trim($data['reason']), 'evidence' => json_encode(['contribution_record_id' => $contribution?->id, 'amount_minor' => $entry->amount_minor, 'currency_code' => $entry->currency_code]),
+                'reason' => trim($data['reason']), 'evidence' => json_encode(['contribution_record_id' => $contribution?->id, 'amount_minor' => $entry->amount_minor, 'currency_code' => $entry->currency_code, 'wallet_posting' => $walletPosting]),
                 'created_at' => now(),
             ]);
             BusinessAuditEvent::query()->create([
                 'business_id' => $business->id, 'actor_user_id' => $request->user()->id,
                 'action' => 'reconciliation.entry_decided', 'subject_type' => 'reconciliation_entry', 'subject_id' => $entry->id,
-                'metadata' => ['decision' => $data['decision'], 'reason' => trim($data['reason']), 'contribution_record_id' => $contribution?->id, 'note' => 'Reconciliation does not alter contribution amounts or prove provider settlement.'],
+                'metadata' => ['decision' => $data['decision'], 'reason' => trim($data['reason']), 'contribution_record_id' => $contribution?->id, 'wallet_posting' => $walletPosting, 'note' => 'Only an authorized exact-match decision posts the savings wallet credit.'],
                 'ip_address' => $request->ip(), 'user_agent' => Str::limit((string) $request->userAgent(), 500, ''), 'created_at' => now(),
             ]);
-            return response()->json(['data' => $entry->fresh(), 'message' => 'Reconciliation decision audited. No contribution amount, ledger, payout or settlement status was changed.']);
+            return response()->json(['data' => $entry->fresh(), 'wallet_posting' => $walletPosting, 'message' => $data['decision'] === 'match' ? 'Reconciliation matched and wallet credit was posted idempotently.' : 'Reconciliation decision audited; no wallet credit was posted.']);
         });
     }
 }
