@@ -83,6 +83,7 @@ class PaymentWorkflowController extends Controller
             'amount_minor' => ['required', 'integer', 'min:1', 'max:1000000000000'],
             'currency_code' => ['required', 'string', 'size:3', 'regex:/^[A-Z]{3}$/'],
             'client_reference' => ['required', 'string', 'max:100', 'regex:/^[A-Za-z0-9._:-]+$/'],
+            'purpose' => ['required', 'string', 'min:3', 'max:255'],
             'provider_reference' => ['nullable', 'string', 'max:160'],
         ]);
         $manual = $data['provider'] === 'manual';
@@ -94,16 +95,16 @@ class PaymentWorkflowController extends Controller
                 ['business_id' => $business->id, 'client_reference' => $data['client_reference']],
                 ['user_id' => $request->user()->id, 'provider' => 'manual', 'method' => 'manual',
                     'status' => 'pending_review', 'amount_minor' => $data['amount_minor'],
-                    'currency_code' => $data['currency_code'], 'provider_reference' => $data['provider_reference'] ?? null]
+                    'currency_code' => $data['currency_code'], 'purpose' => trim($data['purpose']), 'provider_reference' => $data['provider_reference'] ?? null]
             );
-            if ($deposit->user_id !== $request->user()->id || $deposit->amount_minor !== (int) $data['amount_minor'] || $deposit->currency_code !== $data['currency_code']) {
+            if ($deposit->user_id !== $request->user()->id || $deposit->amount_minor !== (int) $data['amount_minor'] || $deposit->currency_code !== $data['currency_code'] || $deposit->purpose !== trim($data['purpose'])) {
                 abort(409, 'Idempotency reference was already used with different deposit details.');
             }
             if ($deposit->wasRecentlyCreated) PaymentOperationEvent::query()->create([
                 'business_id' => $business->id, 'operation_type' => 'deposit', 'operation_id' => $deposit->id,
                 'actor_user_id' => $request->user()->id, 'event' => 'manual_deposit_submitted',
-                'reason' => 'Submitted for independent review; this does not credit a balance.',
-                'evidence' => ['provider_reference_supplied' => ! empty($data['provider_reference'])], 'created_at' => now(),
+                'reason' => 'Purpose: '.trim($data['purpose']).'. Submitted for independent review; this does not credit a balance.',
+                'evidence' => ['purpose' => trim($data['purpose']), 'provider_reference_supplied' => ! empty($data['provider_reference'])], 'created_at' => now(),
             ]);
             return $deposit;
         });
@@ -152,6 +153,7 @@ class PaymentWorkflowController extends Controller
             'amount_minor' => ['required', 'integer', 'min:1', 'max:1000000000000'],
             'currency_code' => ['required', 'string', 'size:3', 'regex:/^[A-Z]{3}$/'],
             'client_reference' => ['required', 'string', 'max:100', 'regex:/^[A-Za-z0-9._:-]+$/'],
+            'purpose' => ['required', 'string', 'min:3', 'max:255'],
             'account_verification_id' => ['required', 'integer', 'min:1'],
         ]);
         if ($data['provider'] !== 'manual') {
@@ -180,9 +182,9 @@ class PaymentWorkflowController extends Controller
                 ['business_id' => $business->id, 'client_reference' => $data['client_reference']],
                 ['user_id' => $request->user()->id, 'provider' => 'manual', 'method' => 'manual',
                     'status' => 'requested', 'amount_minor' => $data['amount_minor'],
-                    'currency_code' => $data['currency_code'], 'destination_ciphertext' => $destination]
+                    'currency_code' => $data['currency_code'], 'destination_ciphertext' => $destination, 'purpose' => trim($data['purpose'])]
             );
-            if ($payout->user_id !== $request->user()->id || $payout->amount_minor !== (int) $data['amount_minor'] || $payout->currency_code !== $data['currency_code'] || $payout->destination_ciphertext !== $destination) {
+            if ($payout->user_id !== $request->user()->id || $payout->amount_minor !== (int) $data['amount_minor'] || $payout->currency_code !== $data['currency_code'] || $payout->purpose !== trim($data['purpose']) || $payout->destination_ciphertext !== $destination) {
                 abort(409, 'Idempotency reference was already used with different payout details.');
             }
             $walletPosting = ['status' => 'already_posted', 'transaction_id' => null];
@@ -198,7 +200,7 @@ class PaymentWorkflowController extends Controller
             if ($payout->wasRecentlyCreated) PaymentOperationEvent::query()->create([
                 'business_id' => $business->id, 'operation_type' => 'payout', 'operation_id' => $payout->id,
                 'actor_user_id' => $request->user()->id, 'event' => 'payout_requested',
-                'reason' => 'Wallet balance debited and withdrawal entered independent approval; no bank transfer was initiated.', 'evidence' => ['provider' => 'manual', 'bank_verification_id' => $verification->id, 'bank_code' => $verification->bank_code, 'wallet_ledger_transaction_id' => $walletPosting['transaction_id']], 'created_at' => now(),
+                'reason' => 'Purpose: '.trim($data['purpose']).'. Wallet balance debited and withdrawal entered independent approval; no bank transfer was initiated.', 'evidence' => ['purpose' => trim($data['purpose']), 'provider' => 'manual', 'bank_verification_id' => $verification->id, 'bank_code' => $verification->bank_code, 'wallet_ledger_transaction_id' => $walletPosting['transaction_id']], 'created_at' => now(),
             ]);
             return $payout;
         });
