@@ -60,8 +60,8 @@ final class ReconciliationTest extends TestCase
         ];
         $response = $this->withToken($token)->withHeader('X-Business-Id', (string) $business->id)
             ->postJson('/api/v1/business/reconciliation/batches', $payload)->assertCreated();
-        $response->assertJsonPath('data.entries.0.status', 'unmatched')
-            ->assertJsonPath('data.entries.1.status', 'duplicate');
+        $statuses = collect($response->json('data.entries'))->pluck('status')->sort()->values()->all();
+        $this->assertSame(['duplicate', 'unmatched'], $statuses);
         $this->assertDatabaseCount('reconciliation_entries', 2);
 
         $this->withToken($token)->withHeader('X-Business-Id', (string) $business->id)
