@@ -4,10 +4,13 @@ use App\Domain\Country\CountryConfiguration;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BusinessController;
 use App\Http\Controllers\Api\V1\BusinessMembershipController;
+use App\Http\Controllers\Api\V1\DashboardController;
+use App\Http\Controllers\Api\V1\AdminDashboardController;
 use App\Http\Middleware\AuthenticateApiToken;
 use App\Http\Middleware\EnsureVerifiedEmail;
 use App\Http\Middleware\RequireBusinessMembership;
 use App\Http\Middleware\RequireBusinessPermission;
+use App\Http\Middleware\RequirePlatformAdmin;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
@@ -37,6 +40,10 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/me', [AuthController::class, 'me']);
             Route::post('/logout', [AuthController::class, 'logout']);
             Route::post('/email/verification-notification', [AuthController::class, 'resendVerification'])->middleware('throttle:3,1');
+            Route::get('/dashboard/summary', [DashboardController::class, 'summary']);
+            Route::middleware(RequirePlatformAdmin::class)->prefix('admin')->group(function (): void {
+                Route::get('/dashboard', [AdminDashboardController::class, 'summary']);
+            });
         });
     });
 
