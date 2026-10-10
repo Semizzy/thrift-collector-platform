@@ -50,6 +50,9 @@ class ContributionAdjustmentController extends Controller
 
         $adjustment = DB::transaction(function () use ($request, $business, $record, $data) {
             $lockedRecord = ContributionRecord::query()->whereKey($record->id)->lockForUpdate()->firstOrFail();
+            if ($lockedRecord->status === 'reversed') {
+                return null;
+            }
             $conflict = ContributionRecordAdjustment::query()->where('contribution_record_id', $lockedRecord->id)
                 ->where(function ($query): void {
                     $query->where('status', 'pending')
@@ -73,7 +76,7 @@ class ContributionAdjustmentController extends Controller
         });
 
         if (! $adjustment) {
-            return response()->json(['message' => 'A pending adjustment or approved reversal already exists for this contribution record.'], 409);
+            return response()->json(['message' => 'This contribution is already reversed, or an unresolved adjustment or approved reversal already exists.'], 409);
         }
         return response()->json(['data' => $adjustment, 'message' => 'Adjustment request recorded for independent review. Original contribution data is unchanged.'], 201);
     }
@@ -92,6 +95,13 @@ class ContributionAdjustmentController extends Controller
                 ->whereHas('group', fn ($query) => $query->where('business_id', $business->id))
                 ->lockForUpdate()->first();
             if (! $adjustment) return response()->json(['message' => 'Adjustment request not found.'], 404);
+            $isActiveGroupMember = $adjustment->group->memberships()
+                ->where('user_id', $request->user()->id)
+                ->where('status', 'active')
+                ->exists();
+            if (! $isActiveGroupMember) {
+                return response()->json(['message' => 'Active membership in this thrift group is required to decide an adjustment.'], 403);
+            }
             if ($adjustment->requested_by_user_id === $request->user()->id) {
                 return response()->json(['message' => 'The requester cannot approve or reject their own adjustment.'], 403);
             }
