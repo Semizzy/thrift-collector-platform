@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -20,7 +21,11 @@ class EnsureTransactionPin
             return response()->json(['message' => 'Transaction PIN verification is temporarily locked after repeated failures. Try again later.'], 429);
         }
 
-        $data = $request->validate(['transaction_pin' => ['required', 'digits:4']]);
+        $data = $request->validate([
+            'transaction_pin' => ['required', 'digits:4'],
+            'purpose' => ['required', 'string', 'min:3', 'max:255'],
+        ]);
+
         if (! Hash::check($data['transaction_pin'], $user->transaction_pin_hash)) {
             $attempts = (int) $user->transaction_pin_failed_attempts + 1;
             $user->forceFill([
@@ -37,7 +42,31 @@ class EnsureTransactionPin
 
         $user->forceFill(['transaction_pin_failed_attempts' => 0, 'transaction_pin_locked_until' => null])->save();
         $request->attributes->set('verified_transaction_pin', true);
+        $response = $next($request);
 
-        return $next($request);
+        if ($response->getStatusCode() >= 200 && $response->getStatusCode() < 300) {
+            $body = json_decode($response->getContent(), true);
+            $recordId = $body['data']['id'] ?? null;
+            $business = $request->attributes->get('current_business');
+            $path = $request->path();
+            $table = str_ends_with($path, '/payments/deposits') ? 'deposit_intents'
+                : (str_ends_with($path, '/payments/payouts') ? 'payout_requests' : null);
+            if ($table && is_numeric($recordId) && $business) {
+                DB::table($table)->where('business_id', $business->id)->where('id', (int) $recordId)
+                    ->where('user_id', $user->id)->update(['purpose' => trim($data['purpose']), 'updated_at' => now()]);
+                DB::table('payment_operation_events')->insert([
+                    'business_id' => $business->id,
+                    'operation_type' => $table === 'deposit_intents' ? 'deposit' : 'payout',
+                    'operation_id' => (int) $recordId,
+                    'actor_user_id' => $user->id,
+                    'event' => 'transaction_purpose_recorded',
+                    'reason' => trim($data['purpose']),
+                    'evidence' => json_encode(['transaction_pin_verified' => true, 'financial_posting' => false], JSON_THROW_ON_ERROR),
+                    'created_at' => now(),
+                ]);
+            }
+        }
+
+        return $response;
     }
 }
