@@ -146,6 +146,39 @@ final class ApiAuthenticationTest extends TestCase
             ->assertOk()->assertJsonPath('token_type', 'Bearer');
     }
 
+    public function test_authorized_platform_admin_can_change_audited_login_lockout_duration(): void
+    {
+        $admin = User::query()->create([
+            'name' => 'Security Admin', 'email' => 'security-admin@example.test',
+            'password' => 'a-strong-test-password',
+        ]);
+        $admin->forceFill([
+            'platform_role' => 'admin',
+            'platform_permissions' => ['platform.security.manage'],
+        ])->save();
+        $plain = str_repeat('s', 64);
+        PersonalAccessToken::query()->create([
+            'user_id' => $admin->id, 'name' => 'security-admin-test',
+            'token_hash' => hash('sha256', $plain), 'expires_at' => now()->addDay(),
+        ]);
+
+        $this->withToken($plain)->getJson('/api/v1/admin/security-settings')
+            ->assertOk()->assertJsonPath('data.failed_login_attempt_limit', 3)
+            ->assertJsonPath('data.login_lockout_hours', 1)
+            ->assertJsonPath('data.transaction_pin_failed_attempt_limit', 3);
+
+        $this->withToken($plain)->putJson('/api/v1/admin/security-settings', [
+            'login_lockout_hours' => 6,
+            'reason' => 'Increase lockout time after credential abuse.',
+        ])->assertOk()->assertJsonPath('data.login_lockout_hours', 6);
+
+        $this->assertDatabaseHas('platform_settings', ['key' => 'login_lockout_hours', 'value' => '6']);
+        $this->assertDatabaseHas('platform_audit_events', [
+            'actor_user_id' => $admin->id,
+            'action' => 'platform.security.login_lockout_updated',
+        ]);
+    }
+
     public function test_reset_password_page_renders(): void
     {
         $this->get('/reset-password?email=person%40example.test&token=sample-token')
