@@ -23,6 +23,9 @@ class TransactionPinController extends Controller
     public function store(Request $request): JsonResponse
     {
         $user = $request->user();
+        if (! $user->hasVerifiedEmail()) {
+            return response()->json(['message' => 'Verify your email before setting or changing transaction security settings.'], 403);
+        }
         $data = $request->validate([
             'pin' => ['required', 'digits:4'],
             'current_password' => ['required', 'string', 'max:255'],
