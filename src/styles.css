@@ -96,3 +96,21 @@
 .pin-otp-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: stretch; }
 .pin-otp-row .button { white-space: nowrap; }
 @media (max-width: 520px) { .pin-otp-row { grid-template-columns: 1fr; } }
+
+
+/* Member deposit and payout request workflow */
+.payment-workflow { display: grid; gap: 18px; }
+.payment-workflow .panel { min-width: 0; }
+.payment-workflow .pin-form { max-width: 620px; }
+.payment-workflow .pin-form select,
+.payment-workflow .pin-form input { min-height: 44px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); font: inherit; letter-spacing: normal; }
+.payment-history { display: grid; gap: 0; }
+.payment-history-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 15px 0; border-bottom: 1px solid var(--border); }
+.payment-history-row:last-child { border-bottom: 0; }
+.payment-history-main { min-width: 0; display: grid; gap: 5px; }
+.payment-history-main strong { font-size: 13px; }
+.payment-history-main small { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.payment-history-side { display: grid; justify-items: end; gap: 8px; flex: 0 0 auto; }
+.payment-history-side > strong { font-size: 13px; }
+@media (min-width: 1000px) { .payment-workflow { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } .payment-workflow > .panel:nth-of-type(n+3), .payment-workflow > .auth-error, .payment-workflow > .account-success, .payment-workflow > .deposit-consent-note { grid-column: 1 / -1; } }
+@media (max-width: 560px) { .payment-history-row { gap: 10px; } .payment-history-side > strong { font-size: 11px; } .payment-history-side .status-pill { font-size: 9px; } }
