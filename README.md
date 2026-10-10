@@ -33,6 +33,8 @@ The Laravel 12/PHP foundation, versioned API, authentication and business-member
 Requirements: PHP 8.2+ and Composer 2.
 
     composer install
+    npm install
+    npm run build
     composer validate --no-check-publish
     composer lint
     composer test
