@@ -214,4 +214,84 @@ final class PaymentWorkflowTest extends TestCase
             ])->assertStatus(503);
         $this->assertDatabaseCount('deposit_intents', 0);
     }
+
+    public function test_paystack_assignment_webhook_is_signed_idempotent_and_never_credits_a_balance(): void
+    {
+        [$owner, , $business] = $this->fixture();
+        $secret = 'whsec_test_assignment_secret';
+        PaymentGatewayConfig::query()->create([
+            'business_id' => $business->id, 'provider' => 'paystack', 'direction' => 'deposit',
+            'status' => 'disabled', 'public_config' => ['environment' => 'test'],
+            'credentials_ciphertext' => json_encode(['secret_key' => $secret], JSON_THROW_ON_ERROR),
+            'updated_by_user_id' => $owner->id,
+        ]);
+        $account = UserDepositAccount::query()->create([
+            'business_id' => $business->id, 'user_id' => $owner->id, 'provider' => 'paystack',
+            'provider_customer_id' => 'CUS-ASSIGN-001', 'bank_code' => 'wema-bank', 'bank_name' => 'Wema Bank',
+            'currency_code' => 'NGN', 'status' => 'provisioning', 'client_reference' => 'ASSIGN-001',
+        ]);
+        $payload = ['event' => 'dedicated_account.assign.success', 'data' => [
+            'id' => 501, 'customer' => ['customer_code' => 'CUS-ASSIGN-001'],
+            'dedicated_account' => ['id' => 501, 'account_number' => '0123456789', 'account_name' => 'PAYMENTS OWNER',
+                'bank' => ['slug' => 'wema-bank', 'name' => 'Wema Bank'], 'currency' => 'NGN'],
+        ]];
+        $raw = json_encode($payload, JSON_THROW_ON_ERROR);
+        $signature = hash_hmac('sha512', $raw, $secret);
+        $this->call('POST', '/api/v1/webhooks/paystack', [], [], [], [
+            'CONTENT_TYPE' => 'application/json', 'HTTP_X_PAYSTACK_SIGNATURE' => $signature,
+        ], $raw)->assertOk()->assertJsonPath('duplicate', false);
+        $this->assertDatabaseHas('user_deposit_accounts', ['id' => $account->id, 'status' => 'active']);
+        $stored = \Illuminate\Support\Facades\DB::table('user_deposit_accounts')->where('id', $account->id)->value('account_number_ciphertext');
+        $this->assertStringNotContainsString('0123456789', $stored);
+        $this->assertDatabaseCount('deposit_intents', 0);
+        $this->call('POST', '/api/v1/webhooks/paystack', [], [], [], [
+            'CONTENT_TYPE' => 'application/json', 'HTTP_X_PAYSTACK_SIGNATURE' => $signature,
+        ], $raw)->assertOk()->assertJsonPath('duplicate', true);
+        $this->assertDatabaseCount('provider_webhook_events', 1);
+    }
+
+    public function test_paystack_charge_webhook_requires_signature_and_creates_reconciliation_evidence_without_credit(): void
+    {
+        [$owner, $reviewer, $business, $tokens] = $this->fixture();
+        $secret = 'whsec_test_charge_secret';
+        PaymentGatewayConfig::query()->create([
+            'business_id' => $business->id, 'provider' => 'paystack', 'direction' => 'deposit',
+            'status' => 'disabled', 'public_config' => ['environment' => 'test'],
+            'credentials_ciphertext' => json_encode(['secret_key' => $secret], JSON_THROW_ON_ERROR),
+            'updated_by_user_id' => $owner->id,
+        ]);
+        UserDepositAccount::query()->create([
+            'business_id' => $business->id, 'user_id' => $owner->id, 'provider' => 'paystack',
+            'provider_account_id' => 'DVA-CHARGE-01', 'provider_customer_id' => 'CUS-CHARGE-01',
+            'bank_code' => 'wema-bank', 'bank_name' => 'Wema Bank',
+            'account_number_ciphertext' => '0123456789', 'account_number_hash' => hash('sha256', '0123456789'),
+            'account_name_ciphertext' => 'PAYMENTS OWNER', 'currency_code' => 'NGN',
+            'status' => 'active', 'client_reference' => 'CHARGE-ACCOUNT-01', 'assigned_at' => now(),
+        ]);
+        $payload = ['event' => 'charge.success', 'data' => [
+            'id' => 9001, 'reference' => 'PAYSTACK-TRANSFER-9001', 'amount' => 250000, 'currency' => 'NGN',
+            'status' => 'success', 'channel' => 'bank_transfer', 'paid_at' => now()->toISOString(),
+            'customer' => ['customer_code' => 'CUS-CHARGE-01'],
+        ]];
+        $raw = json_encode($payload, JSON_THROW_ON_ERROR);
+        $this->call('POST', '/api/v1/webhooks/paystack', [], [], [], [
+            'CONTENT_TYPE' => 'application/json', 'HTTP_X_PAYSTACK_SIGNATURE' => 'invalid',
+        ], $raw)->assertUnauthorized();
+        $this->assertDatabaseCount('provider_webhook_events', 0);
+        $signature = hash_hmac('sha512', $raw, $secret);
+        $this->call('POST', '/api/v1/webhooks/paystack', [], [], [], [
+            'CONTENT_TYPE' => 'application/json', 'HTTP_X_PAYSTACK_SIGNATURE' => $signature,
+        ], $raw)->assertOk();
+        $eventId = \Illuminate\Support\Facades\DB::table('provider_deposit_events')->where('provider_transaction_id', '9001')->value('id');
+        $this->assertDatabaseHas('provider_deposit_events', [
+            'id' => $eventId, 'business_id' => $business->id, 'amount_minor' => 250000,
+            'currency_code' => 'NGN', 'status' => 'needs_review',
+        ]);
+        $this->withToken($tokens[$reviewer->id])->withHeader('X-Business-Id', (string) $business->id)
+            ->postJson('/api/v1/business/payments/provider-deposits/'.$eventId.'/review', [
+                'decision' => 'confirm_evidence', 'reason' => 'Matched the signed transfer against the bank statement.',
+            ])->assertOk()->assertJsonPath('data.status', 'evidence_reconciled');
+        $this->assertDatabaseCount('deposit_intents', 0);
+    }
+
 }
