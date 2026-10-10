@@ -148,7 +148,6 @@ final class BusinessMembershipManagementTest extends TestCase
 
     private function ownerAndBusiness(): array
     {
-        $this->seed();
         $owner = $this->verifiedUser('owner-'.uniqid().'@example.test');
         $business = $this->businessFor($owner);
         $token = $this->tokenFor($owner);
@@ -158,6 +157,7 @@ final class BusinessMembershipManagementTest extends TestCase
 
     private function businessFor(User $owner): Business
     {
+        $this->seed();
         $business = Business::query()->create([
             'name' => 'Test Thrift Business',
             'slug' => 'thrift-'.strtolower(substr(sha1($owner->email), 0, 10)),
