@@ -58,7 +58,7 @@ Route::prefix('v1')->group(function (): void {
 
         Route::middleware(RequireBusinessMembership::class)->prefix('business')->group(function (): void {
             Route::get('/current', [BusinessController::class, 'current']);
-            Route::get('/members', [BusinessMembershipController::class, 'index'])
+            Route::get('/groups', [ThriftGroupController::class, 'index'])\n                ->middleware(RequireBusinessPermission::class.':arrangements.view');\n            Route::post('/groups', [ThriftGroupController::class, 'store'])\n                ->middleware([RequireBusinessPermission::class.':arrangements.manage', 'throttle:10,1']);\n            Route::get('/groups/{groupId}/contributions', [ContributionRecordController::class, 'index'])\n                ->whereNumber('groupId')->middleware(RequireBusinessPermission::class.':arrangements.view');\n            Route::post('/groups/{groupId}/contributions', [ContributionRecordController::class, 'store'])\n                ->whereNumber('groupId')->middleware([RequireBusinessPermission::class.':contributions.record', 'throttle:20,1']);\n            Route::post('/groups/{groupId}/contributions/{recordId}/confirm', [ContributionRecordController::class, 'confirm'])\n                ->whereNumber('groupId')->whereNumber('recordId')->middleware(RequireBusinessPermission::class.':collections.confirm');\n            Route::get('/members', [BusinessMembershipController::class, 'index'])
                 ->middleware(RequireBusinessPermission::class.':members.view');
             Route::get('/audit-events', [BusinessMembershipController::class, 'auditEvents'])
                 ->middleware(RequireBusinessPermission::class.':members.view');
