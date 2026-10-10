@@ -732,7 +732,7 @@ final class PaymentWorkflowTest extends TestCase
         $first = $ledger->debitWithdrawal((int) $business->id, (int) $owner->id, 'NGN', 5000, 990016, (int) $reviewer->id);
         self::assertSame('posted', $first['status']);
 
-        $this->expectException(\\InvalidArgumentException::class);
+        $this->expectException(\InvalidArgumentException::class);
         $ledger->debitWithdrawal((int) $business->id, (int) $owner->id, 'NGN', 4000, 990016, (int) $reviewer->id);
     }
 }
