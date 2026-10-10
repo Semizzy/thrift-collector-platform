@@ -74,6 +74,10 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/current', [BusinessController::class, 'current']);
             Route::get('/payments/gateways', [PaymentWorkflowController::class, 'gateways'])
                 ->middleware(RequireBusinessPermission::class.':payments.manage');
+            Route::put('/payments/gateways/{provider}/{direction}', [PaymentWorkflowController::class, 'configureGateway'])
+                ->where('provider', 'paystack|opay|monnify|flutterwave|manual')
+                ->where('direction', 'deposit|payout')
+                ->middleware([RequireBusinessPermission::class.':payments.manage', 'throttle:5,1']);
             Route::get('/payments/deposits', [PaymentWorkflowController::class, 'deposits']);
             Route::post('/payments/deposits', [PaymentWorkflowController::class, 'createDeposit'])
                 ->middleware('throttle:10,1');
