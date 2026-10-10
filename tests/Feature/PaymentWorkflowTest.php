@@ -137,7 +137,7 @@ final class PaymentWorkflowTest extends TestCase
 
         $verificationId = $response->json('data.verification_id');
         $this->assertDatabaseHas('bank_account_verifications', ['id' => $verificationId, 'status' => 'verified']);
-        $stored = \\Illuminate\\Support\\Facades\\DB::table('bank_account_verifications')->where('id', $verificationId)->value('account_number_ciphertext');
+        $stored = \Illuminate\Support\Facades\DB::table('bank_account_verifications')->where('id', $verificationId)->value('account_number_ciphertext');
         $this->assertStringNotContainsString('0123456789', $stored);
     }
 
