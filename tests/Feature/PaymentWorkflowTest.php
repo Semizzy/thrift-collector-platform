@@ -289,6 +289,13 @@ final class PaymentWorkflowTest extends TestCase
             'currency_code' => 'NGN', 'status' => 'needs_review',
         ]);
         $this->withToken($tokens[$reviewer->id])->withHeader('X-Business-Id', (string) $business->id)
+            ->getJson('/api/v1/business/payments/provider-deposits')
+            ->assertOk()->assertJsonPath('data.data.0.id', $eventId);
+        $this->withToken($tokens[$owner->id])->withHeader('X-Business-Id', (string) $business->id)
+            ->postJson('/api/v1/business/payments/provider-deposits/'.$eventId.'/review', [
+                'decision' => 'confirm_evidence', 'reason' => 'I am the account holder reviewing my own deposit.',
+            ])->assertForbidden();
+        $this->withToken($tokens[$reviewer->id])->withHeader('X-Business-Id', (string) $business->id)
             ->postJson('/api/v1/business/payments/provider-deposits/'.$eventId.'/review', [
                 'decision' => 'confirm_evidence', 'reason' => 'Matched the signed transfer against the bank statement.',
             ])->assertOk()->assertJsonPath('data.status', 'evidence_reconciled');
@@ -331,6 +338,29 @@ final class PaymentWorkflowTest extends TestCase
         $this->assertDatabaseHas('payment_operation_events', [
             'operation_type' => 'user_deposit_account', 'operation_id' => $account->id, 'event' => 'dva_assignment_recovered',
         ]);
+    }
+
+
+
+    public function test_provider_deposit_review_queue_is_forbidden_to_members_without_reconciliation_permission(): void
+    {
+        [$owner, , $business] = $this->fixture();
+        $member = User::query()->create([
+            'name' => 'Read Only Contributor', 'email' => 'contributor@example.test',
+            'password' => 'strong-test-password', 'email_verified_at' => now(),
+        ]);
+        BusinessMembership::query()->create([
+            'business_id' => $business->id, 'user_id' => $member->id,
+            'role' => 'contributor', 'status' => 'active', 'joined_at' => now(),
+        ]);
+        $plain = str_repeat('c', 64);
+        PersonalAccessToken::query()->create([
+            'user_id' => $member->id, 'name' => 'contributor-test',
+            'token_hash' => hash('sha256', $plain), 'expires_at' => now()->addDay(),
+        ]);
+
+        $this->withToken($plain)->withHeader('X-Business-Id', (string) $business->id)
+            ->getJson('/api/v1/business/payments/provider-deposits')->assertForbidden();
     }
 
 
