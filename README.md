@@ -86,3 +86,12 @@ Configure Paystack to send signed webhooks to `POST /api/v1/webhooks/paystack`. 
 Business members with the `reconciliation.manage` permission can inspect provider deposits through `GET /api/v1/business/payments/provider-deposits` and record an independent evidence decision through `POST /api/v1/business/payments/provider-deposits/{eventId}/review`. Decisions are immutable after first review; corrections need a separately audited correction process.
 
 **Important financial release boundary:** signed webhook receipt and a successful reconciliation evidence decision do not prove provider settlement and do not credit a wallet, contribution, or ledger. Automated settlement verification, independently reviewed ledger posting/reversal workflows, sandbox certification, and production release approval remain separate gates. Do not enable live money movement based only on this webhook increment.
+
+
+### Provider deposit review and pending-account recovery
+
+The web dashboard includes a **Deposit review** queue for business owners, managers, and auditors with `reconciliation.manage`. Other workspace roles are not shown the navigation entry, and the API independently enforces the same permission. Review decisions require a reason, are recorded in the payment-operation audit trail, and cannot be self-approved by the account holder.
+
+The `payments:recover-deposit-accounts` Artisan command is scheduled every ten minutes and can also be run manually. It checks only Paystack accounts still in `provisioning` for at least ten minutes, re-queries the existing provider account/customer, and updates the existing row only after provider data confirms assignment. It never creates another provider assignment and never posts a balance or ledger credit. Attempts are throttled to at most 12 per account, with recovery timestamps/results retained for support diagnostics.
+
+For cPanel, configure Laravel's scheduler with a cron entry that runs `php /path/to/project/artisan schedule:run` every minute, using the hosting account's actual PHP CLI path and application directory. The scheduled recovery task itself runs every ten minutes. Check the command output and Laravel logs when an account remains pending; after the retry limit, support must investigate provider/customer/bank matching rather than automatically creating a replacement account.
