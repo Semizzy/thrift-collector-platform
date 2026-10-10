@@ -50,6 +50,8 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/current', [BusinessController::class, 'current']);
             Route::get('/members', [BusinessMembershipController::class, 'index'])
                 ->middleware(RequireBusinessPermission::class.':members.view');
+            Route::get('/audit-events', [BusinessMembershipController::class, 'auditEvents'])
+                ->middleware(RequireBusinessPermission::class.':members.view');
             Route::get('/invitations', [BusinessMembershipController::class, 'invitations'])
                 ->middleware(RequireBusinessPermission::class.':members.manage');
             Route::post('/invitations', [BusinessMembershipController::class, 'invite'])
