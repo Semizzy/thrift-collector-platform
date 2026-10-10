@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import {
-  Activity, ArrowDownLeft, ArrowRight, Bell, CalendarClock, CheckCircle2,
+  Activity, ArrowDownLeft, ArrowRight, Bell, CalendarClock, CheckCircle2, Copy, Landmark, Plus, RefreshCw,
   ChevronDown, CircleHelp, ClipboardCheck, FileText, Home,
   LayoutDashboard, LogOut, Menu, Moon, Search, Settings, ShieldCheck,
   Sun, Users, Wallet, X, type LucideIcon,
@@ -13,6 +13,7 @@ const userNav: NavItem[] = [
   { label: 'Overview', icon: Home },
   { label: 'My groups', icon: Users },
   { label: 'Contributions', icon: Wallet },
+  { label: 'Bank accounts', icon: Landmark },
   { label: 'Statements', icon: FileText },
   { label: 'Support & disputes', icon: CircleHelp },
 ];
@@ -118,6 +119,8 @@ function EmptyPanel({ icon: Icon, title, body }: { icon: LucideIcon; title: stri
 }
 
 type DashboardProfile = { id: number; name: string; email: string; email_verified_at: string | null };
+type DepositAccount = { id: number; provider: string; bank_code: string; bank_name: string; account_number: string | null; account_name: string | null; currency_code: string; status: string; assigned_at: string | null };
+type DepositBank = { code: string; name: string; provider: string; currency_code: string };
 type DashboardSummary = { user: DashboardProfile; active_workspaces_count: number; workspaces: Array<{ id: number; name: string; country_code: string; status: string; role: string }>; active_groups_count: number; groups: Array<{ id: number; business_id: number; name: string; description: string | null; currency_code: string; status: string; role: string; joined_at: string | null }>; confirmed_contribution_totals: Array<{ currency_code: string; total_minor: number; records_count: number }>; recent_contributions: Array<{ id: number; thrift_group_id: number; user_id: number; amount_minor: number; currency_code: string; status: string; collection_method: string; reference: string | null; created_at: string; confirmed_at: string | null; group: { id: number; name: string; currency_code: string } | null }>; upcoming_obligations_count: number; upcoming_obligations: Array<{ id: number; status: string; expected_amount_minor: number; currency_code: string; due_on: string | null; group: { id: number; name: string } | null }>; financial_data_status: string; message: string };
 
 function UserDashboard({ active }: { active: string }) {
@@ -128,6 +131,16 @@ function UserDashboard({ active }: { active: string }) {
   const [authError, setAuthError] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [selectedBusinessId, setSelectedBusinessId] = useState('');
+  const [depositAccounts, setDepositAccounts] = useState<DepositAccount[]>([]);
+  const [depositBanks, setDepositBanks] = useState<DepositBank[]>([]);
+  const [accountLoading, setAccountLoading] = useState(false);
+  const [banksLoading, setBanksLoading] = useState(false);
+  const [accountCreating, setAccountCreating] = useState(false);
+  const [selectedBankCode, setSelectedBankCode] = useState('');
+  const [accountError, setAccountError] = useState('');
+  const [accountMessage, setAccountMessage] = useState('');
+  const [bankError, setBankError] = useState('');
 
   useEffect(() => {
     if (!token) { setAuthLoading(false); setProfile(null); setDashboardData(null); return; }
@@ -139,7 +152,7 @@ function UserDashboard({ active }: { active: string }) {
         return response.json() as Promise<{ data: DashboardSummary }>;
       })
       .then(result => {
-        if (!cancelled) { setProfile(result.data.user); setDashboardData(result.data); setAuthError(''); }
+        if (!cancelled) { setProfile(result.data.user); setDashboardData(result.data); setSelectedBusinessId(current => current || String((result.data.workspaces.find(workspace => workspace.status === 'active') ?? result.data.workspaces[0])?.id ?? '')); setAuthError(''); }
       })
       .catch(error => {
         if (!cancelled) { sessionStorage.removeItem('tcp_access_token'); setToken(''); setAuthError(error instanceof Error ? error.message : 'Please sign in to continue.'); }
@@ -147,6 +160,70 @@ function UserDashboard({ active }: { active: string }) {
       .finally(() => { if (!cancelled) setAuthLoading(false); });
     return () => { cancelled = true; };
   }, [token]);
+
+  useEffect(() => {
+    if (!token || !selectedBusinessId) {
+      setDepositAccounts([]);
+      setDepositBanks([]);
+      return;
+    }
+    let cancelled = false;
+    const headers = { Authorization: 'Bearer ' + token, Accept: 'application/json', 'X-Business-Id': selectedBusinessId };
+    setAccountLoading(true);
+    setBanksLoading(true);
+    setAccountError('');
+    setBankError('');
+    fetch('/api/v1/business/payments/deposit-accounts', { headers })
+      .then(async response => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message ?? 'Could not load deposit accounts.');
+        return result as { data: DepositAccount[] };
+      })
+      .then(result => { if (!cancelled) setDepositAccounts(result.data); })
+      .catch(error => { if (!cancelled) setAccountError(error instanceof Error ? error.message : 'Could not load deposit accounts.'); })
+      .finally(() => { if (!cancelled) setAccountLoading(false); });
+    fetch('/api/v1/business/payments/deposit-accounts/banks', { headers })
+      .then(async response => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message ?? 'Bank choices are unavailable.');
+        return result as { data: DepositBank[] };
+      })
+      .then(result => { if (!cancelled) { setDepositBanks(result.data); setSelectedBankCode(current => current || result.data[0]?.code || ''); } })
+      .catch(error => { if (!cancelled) setBankError(error instanceof Error ? error.message : 'Bank choices are unavailable.'); })
+      .finally(() => { if (!cancelled) setBanksLoading(false); });
+    return () => { cancelled = true; };
+  }, [token, selectedBusinessId]);
+
+  async function addDepositAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token || !selectedBusinessId || !selectedBankCode) return;
+    setAccountCreating(true); setAccountError(''); setAccountMessage('');
+    try {
+      const response = await fetch('/api/v1/business/payments/deposit-accounts', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, Accept: 'application/json', 'Content-Type': 'application/json', 'X-Business-Id': selectedBusinessId },
+        body: JSON.stringify({ bank_code: selectedBankCode, currency_code: 'NGN', client_reference: 'DVA-' + crypto.randomUUID(), consent: true }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message ?? 'Could not request a dedicated deposit account.');
+      setAccountMessage(result.message ?? 'Account request submitted.');
+      const refreshed = await fetch('/api/v1/business/payments/deposit-accounts', { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json', 'X-Business-Id': selectedBusinessId } });
+      if (refreshed.ok) { const list = await refreshed.json(); setDepositAccounts(list.data); }
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : 'Could not request a dedicated deposit account.');
+    } finally {
+      setAccountCreating(false);
+    }
+  }
+
+  async function copyDepositAccount(number: string) {
+    try {
+      await navigator.clipboard.writeText(number);
+      setAccountMessage('Account number copied.');
+    } catch {
+      setAccountError('Copy was unavailable in this browser. Please select the account number and copy it manually.');
+    }
+  }
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setAuthError(''); setAuthLoading(true);
@@ -184,13 +261,45 @@ function UserDashboard({ active }: { active: string }) {
   if (authLoading && !profile) return <section className="auth-gate"><div className="auth-card"><strong>Loading your account…</strong><p>Checking your authenticated session.</p></div></section>;
   if (authError && !profile) return <section className="auth-gate"><div className="auth-card"><h1>Session needs attention</h1><p>{authError}</p><button className="button button-primary" onClick={signOut}>Return to sign in</button></div></section>;
 
+  const depositAccountsPanel = <section className="panel deposit-accounts-panel">
+    <div className="panel-heading"><div><h2>Your dedicated deposit accounts</h2><p>Keep two or more bank accounts if supported by the provider. Deposits remain pending reconciliation until independently reviewed.</p></div><button className="text-button" onClick={() => { setAccountMessage(''); setAccountError(''); setAccountLoading(true); fetch('/api/v1/business/payments/deposit-accounts', { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json', 'X-Business-Id': selectedBusinessId } }).then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.message || 'Could not refresh accounts.'); setDepositAccounts(result.data); }).catch(error => setAccountError(error instanceof Error ? error.message : 'Could not refresh accounts.')).finally(() => setAccountLoading(false)); }}><RefreshCw size={15} /> Refresh</button></div>
+    {dashboardData?.workspaces.length ? <label className="business-select-label">Workspace
+      <select value={selectedBusinessId} onChange={event => { setSelectedBusinessId(event.target.value); setAccountMessage(''); setAccountError(''); }} aria-label="Choose workspace for deposit accounts">
+        {dashboardData.workspaces.map(workspace => <option key={workspace.id} value={String(workspace.id)}>{workspace.name} · {workspace.country_code}</option>)}
+      </select>
+    </label> : <p className="muted">Create or join a business workspace before requesting a dedicated account.</p>}
+    {accountError && <p className="auth-error" role="alert">{accountError}</p>}
+    {accountMessage && <p className="account-success" role="status">{accountMessage}</p>}
+    {accountLoading ? <p className="muted">Loading your accounts…</p> : depositAccounts.length ? <div className="deposit-account-list">
+      {depositAccounts.map(account => <article className="deposit-account-card" key={account.id}>
+        <div className="deposit-bank-mark"><Landmark size={20} /></div><div className="deposit-account-details"><strong>{account.bank_name}</strong><span>{account.account_name || 'Account assignment pending'}</span><code>{account.account_number || 'Awaiting provider assignment'}</code><small>{account.currency_code} · {account.status.replaceAll('_', ' ')}</small></div>
+        {account.account_number && <button className="icon-button account-copy" aria-label={'Copy ' + account.bank_name + ' account number'} onClick={() => void copyDepositAccount(account.account_number!)}><Copy size={17} /></button>}
+      </article>)}
+    </div> : <div className="deposit-empty"><Landmark size={22} /><strong>No dedicated accounts yet</strong><p>Request an account below. If assignment is asynchronous, this list will show its current status.</p></div>}
+    <form className="deposit-account-form" onSubmit={addDepositAccount}>
+      <label htmlFor="deposit-bank">Add another bank account</label>
+      <div className="deposit-account-controls">
+        <select id="deposit-bank" required value={selectedBankCode} onChange={event => setSelectedBankCode(event.target.value)} disabled={banksLoading || !depositBanks.length || accountCreating}>
+          <option value="">{banksLoading ? 'Loading supported banks…' : 'Choose a supported bank'}</option>
+          {depositBanks.map(bank => <option key={bank.code} value={bank.code}>{bank.name}</option>)}
+        </select>
+        <button className="button button-primary" type="submit" disabled={accountCreating || banksLoading || !selectedBusinessId || !selectedBankCode}><Plus size={16} />{accountCreating ? 'Requesting…' : 'Add account'}</button>
+      </div>
+      {bankError && <p className="muted">{bankError}</p>}
+      <p className="deposit-consent-note">By requesting an account, you consent to the provider processing the identity details needed to assign it. Available banks depend on provider eligibility and approval.</p>
+    </form>
+  </section>;
+
   if (active === 'My groups' && dashboardData) return <><SectionHeading eyebrow="MEMBER WORKSPACE" title="My groups" description="Thrift groups where you have active membership." />{dashboardData.groups.length ? <div className="content-grid">{dashboardData.groups.map(group => <section className="panel" key={group.id}><div className="panel-heading"><div><h2>{group.name}</h2><p>{group.description || 'No group description provided.'}</p></div><span className="status-pill status-neutral">{group.status}</span></div><div className="stat-foot muted">{group.currency_code} · {group.role} · Group #{group.id}</div></section>)}</div> : <EmptyPanel icon={Users} title="No active thrift groups yet" body="When you join a thrift group, it will appear here." />}</>;
   if (active === 'Contributions' && dashboardData) return <><SectionHeading eyebrow="MEMBER WORKSPACE" title="Contributions" description="Your contribution records from groups you belong to." />{dashboardData.recent_contributions.length ? <section className="panel"><div className="panel-heading"><div><h2>Recent contribution records</h2><p>Record confirmation is not proof of bank deposit or provider settlement.</p></div></div><div className="contribution-list">{dashboardData.recent_contributions.map(record => <div className="check-row" key={record.id}><span className="check-number">{record.status === 'confirmed' ? <CheckCircle2 size={17} /> : <CalendarClock size={17} />}</span><div><strong>{record.group?.name ?? `Group #${record.thrift_group_id}`}</strong><p>{new Date(record.created_at).toLocaleDateString()} · {record.collection_method.replace('_', ' ')}</p></div><div className="contribution-amount"><strong>{new Intl.NumberFormat('en-NG', { style: 'currency', currency: record.currency_code }).format(record.amount_minor / 100)}</strong><small>{record.status}</small></div></div>)}</div></section> : <EmptyPanel icon={Wallet} title="No contribution records yet" body="Records will appear here when a permitted organizer or collector records a contribution for you." />}</>;
+
+  if (active === 'Bank accounts') return <><SectionHeading eyebrow="MEMBER WORKSPACE" title="Bank accounts" description="Manage multiple dedicated accounts for receiving deposits into your thrift workspace." />{depositAccountsPanel}</>;
 
   if (active !== 'Overview') {
     const details: Record<string, { title: string; desc: string; icon: LucideIcon }> = {
       'My groups': { title: 'Your groups will appear here', desc: 'Once you join or are invited to a group, its membership, contribution schedule and rules will be shown here.', icon: Users },
       Contributions: { title: 'No contribution records loaded', desc: 'Confirmed and pending records will appear here when connected to your authenticated account data.', icon: Wallet },
+      'Bank accounts': { title: 'Your deposit accounts', desc: 'View your dedicated deposit accounts and request another supported bank account.', icon: Landmark },
       Statements: { title: 'Statements will appear here', desc: 'Your available statements and receipts will be listed here after the statement API is connected.', icon: FileText },
       'Support & disputes': { title: 'Support centre', desc: 'Support requests and dispute tracking will be available here when their workflows are implemented.', icon: CircleHelp },
     };
@@ -201,6 +310,7 @@ function UserDashboard({ active }: { active: string }) {
   return <>
     <SectionHeading eyebrow="MEMBER WORKSPACE" title={profile ? `Welcome back, ${profile.name.split(' ')[0]}.` : 'Your savings, at a glance.'} description={profile ? `Signed in as ${profile.email}. Your dashboard uses authenticated account data.` : 'Welcome to your personal thrift workspace. Your confirmed activity will appear here.'} />
     <div className="notice"><div className="notice-symbol"><Activity size={18} /></div><div className="notice-copy"><strong>Account data connected securely</strong><p>Your profile, active thrift groups and contribution records are loaded from the authenticated API. Financial totals remain hidden until verified contribution records exist.</p></div><button className="text-button signout-button" onClick={signOut}><LogOut size={15} /> Sign out</button></div>
+    {depositAccountsPanel}
     <section className="stats-grid" aria-label="Account summary">
       <article className="stat-card stat-featured"><div className="stat-top"><span>Total confirmed contributions</span><span className="stat-icon"><Wallet size={19} /></span></div><div className="stat-value">{dashboardData?.confirmed_contribution_totals.length ? dashboardData.confirmed_contribution_totals.map(total => `${total.currency_code} ${new Intl.NumberFormat('en-NG', { maximumFractionDigits: 2 }).format(total.total_minor / 100)}`).join(' · ') : '—'}</div><div className="stat-foot"><span className="status-pill status-neutral"><Activity size={13} /> Confirmed records only</span></div></article>
       <article className="stat-card"><div className="stat-top"><span>Active thrift groups</span><span className="stat-icon green"><Users size={19} /></span></div><div className="stat-value">{dashboardData?.active_groups_count ?? "—"}</div><div className="stat-foot muted">Groups where you have active membership</div></article>
