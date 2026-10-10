@@ -231,7 +231,7 @@ final class PaymentWorkflowTest extends TestCase
             'provider_customer_id' => 'CUS-ASSIGN-001', 'bank_code' => 'wema-bank', 'bank_name' => 'Wema Bank',
             'currency_code' => 'NGN', 'status' => 'provisioning', 'client_reference' => 'ASSIGN-001',
         ]);
-        $payload = ['event' => 'dedicated_account.assign.success', 'data' => [
+        $payload = ['event' => 'dedicatedaccount.assign.success', 'data' => [
             'id' => 501, 'customer' => ['customer_code' => 'CUS-ASSIGN-001'],
             'dedicated_account' => ['id' => 501, 'account_number' => '0123456789', 'account_name' => 'PAYMENTS OWNER',
                 'bank' => ['slug' => 'wema-bank', 'name' => 'Wema Bank'], 'currency' => 'NGN'],
