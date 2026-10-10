@@ -42,3 +42,25 @@
 .admin-api-meta { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 0 0 18px; color: var(--muted, #687386); font-size: 13px; }
 .admin-api-meta strong { color: var(--text, #202939); }
 @media (max-width: 480px) { .admin-api-meta { align-items: flex-start; flex-direction: column; } }
+
+
+.deposit-accounts-panel { margin: 0 0 22px; }
+.business-select-label, .deposit-account-form > label { display: grid; gap: 7px; font-size: 12px; font-weight: 700; margin: 16px 0; color: var(--text, #202939); }
+.business-select-label select, .deposit-account-controls select { min-height: 43px; border: 1px solid var(--border, #dbe2ea); border-radius: 10px; background: var(--surface, #fff); color: inherit; padding: 10px 12px; font: inherit; width: 100%; }
+.deposit-account-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; margin: 15px 0 21px; }
+.deposit-account-card { display: flex; align-items: center; gap: 12px; min-width: 0; border: 1px solid var(--border, #e5eaf0); border-radius: 13px; padding: 14px; background: var(--surface, #fff); }
+.deposit-bank-mark { width: 40px; height: 40px; flex: 0 0 40px; display: grid; place-items: center; border-radius: 11px; background: var(--green-soft); color: var(--green); }
+.deposit-account-details { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; }
+.deposit-account-details strong { font-size: 13px; }
+.deposit-account-details span, .deposit-account-details small { font-size: 11px; color: var(--muted, #687386); }
+.deposit-account-details code { font-size: 12px; font-weight: 700; overflow-wrap: anywhere; color: var(--text, #202939); }
+.account-copy { flex: 0 0 auto; }
+.deposit-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 7px; padding: 24px 14px; border: 1px dashed var(--border, #dbe2ea); border-radius: 12px; color: var(--muted, #687386); }
+.deposit-empty strong { color: var(--text, #202939); font-size: 13px; }
+.deposit-empty p, .deposit-consent-note { font-size: 11px; line-height: 1.6; margin: 0; }
+.deposit-account-form { padding-top: 4px; border-top: 1px solid var(--border, #e5eaf0); }
+.deposit-account-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+.deposit-account-controls .button { white-space: nowrap; }
+.deposit-consent-note { color: var(--muted, #687386); margin-top: 10px; }
+.account-success { color: var(--green, #16805d); font-size: 12px; }
+@media(max-width: 650px) { .deposit-account-list { grid-template-columns: minmax(0, 1fr); } .deposit-account-controls { grid-template-columns: minmax(0, 1fr); } .deposit-account-controls .button { width: 100%; justify-content: center; } }
