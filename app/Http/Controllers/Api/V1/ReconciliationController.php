@@ -111,11 +111,18 @@ class ReconciliationController extends Controller
                 if (! $contribution) {
                     return response()->json(['message' => 'No confirmed contribution in this business has the exact amount and currency. Amount mismatches require human investigation; no automatic match was made.'], 422);
                 }
-                if ($entry->normalized_reference && $contribution->reference) {
-                    $normalized = strtoupper(preg_replace('/\s+/', '', trim($contribution->reference)));
+                if ($entry->normalized_reference) {
+                    if (! $contribution->reference) {
+                        return response()->json(['message' => 'The selected contribution has no reference to verify against the statement entry. Review the exception instead of matching automatically.'], 409);
+                    }
+                    $normalized = strtoupper(preg_replace('/\\s+/', '', trim($contribution->reference)));
                     if (! hash_equals($entry->normalized_reference, $normalized)) {
                         return response()->json(['message' => 'Reference conflict: the external and contribution references differ.'], 409);
                     }
+                }
+                if ($entry->occurred_at && $contribution->created_at
+                    && $entry->occurred_at->diffInDays($contribution->created_at) > 7) {
+                    return response()->json(['message' => 'Date conflict: the contribution and statement dates differ by more than seven days. Review the exception instead of matching.'], 409);
                 }
                 $alreadyMatched = ReconciliationEntry::query()->where('matched_contribution_record_id', $contribution->id)
                     ->where('status', 'matched')->exists();
