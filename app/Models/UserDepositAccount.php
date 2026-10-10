@@ -18,6 +18,8 @@ class UserDepositAccount extends Model
             'account_number_ciphertext' => 'encrypted',
             'account_name_ciphertext' => 'encrypted',
             'assigned_at' => 'datetime',
+            'last_recovery_at' => 'datetime',
+            'recovery_attempts' => 'integer',
         ];
     }
 
