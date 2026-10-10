@@ -10,6 +10,7 @@ use App\Models\PaymentGatewayConfig;
 use App\Models\PersonalAccessToken;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -293,5 +294,44 @@ final class PaymentWorkflowTest extends TestCase
             ])->assertOk()->assertJsonPath('data.status', 'evidence_reconciled');
         $this->assertDatabaseCount('deposit_intents', 0);
     }
+
+
+    public function test_pending_dedicated_account_recovery_requeries_provider_and_updates_existing_record(): void
+    {
+        [$owner, , $business] = $this->fixture();
+        PaymentGatewayConfig::query()->create([
+            'business_id' => $business->id, 'provider' => 'paystack', 'direction' => 'deposit',
+            'status' => 'disabled', 'public_config' => ['environment' => 'test'],
+            'credentials_ciphertext' => json_encode(['secret_key' => 'recovery-test-secret'], JSON_THROW_ON_ERROR),
+            'updated_by_user_id' => $owner->id,
+        ]);
+        $account = UserDepositAccount::query()->create([
+            'business_id' => $business->id, 'user_id' => $owner->id, 'provider' => 'paystack',
+            'provider_customer_id' => 'CUS-RECOVERY-01', 'bank_code' => 'wema-bank', 'bank_name' => 'Wema Bank',
+            'currency_code' => 'NGN', 'status' => 'provisioning', 'client_reference' => 'RECOVERY-001',
+            'created_at' => now()->subMinutes(30), 'updated_at' => now()->subMinutes(30),
+        ]);
+        Http::fake([
+            'https://api.paystack.co/dedicated_account*' => Http::response([
+                'status' => true, 'data' => [[
+                    'id' => 77331, 'account_number' => '0123456789', 'account_name' => 'PAYMENTS OWNER',
+                    'assigned' => true, 'active' => true, 'currency' => 'NGN',
+                    'bank' => ['slug' => 'wema-bank', 'name' => 'Wema Bank'],
+                ]],
+            ], 200),
+        ]);
+
+        $this->assertSame(0, Artisan::call('payments:recover-deposit-accounts'));
+        $this->assertDatabaseHas('user_deposit_accounts', [
+            'id' => $account->id, 'status' => 'active', 'provider_account_id' => '77331',
+            'recovery_attempts' => 1, 'last_recovery_result' => 'assigned',
+        ]);
+        $stored = \Illuminate\Support\Facades\DB::table('user_deposit_accounts')->where('id', $account->id)->value('account_number_ciphertext');
+        $this->assertStringNotContainsString('0123456789', $stored);
+        $this->assertDatabaseHas('payment_operation_events', [
+            'operation_type' => 'user_deposit_account', 'operation_id' => $account->id, 'event' => 'dva_assignment_recovered',
+        ]);
+    }
+
 
 }
