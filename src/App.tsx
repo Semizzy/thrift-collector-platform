@@ -13,6 +13,7 @@ const userNav: NavItem[] = [
   { label: 'Overview', icon: Home },
   { label: 'My groups', icon: Users },
   { label: 'Contributions', icon: Wallet },
+  { label: 'Deposit & payout', icon: ArrowDownLeft },
   { label: 'Bank accounts', icon: Landmark },
   { label: 'Deposit review', icon: ClipboardCheck },
   { label: 'Account operations', icon: AlertTriangle },
@@ -125,6 +126,8 @@ function EmptyPanel({ icon: Icon, title, body }: { icon: LucideIcon; title: stri
 type DashboardProfile = { id: number; name: string; email: string; email_verified_at: string | null };
 type DepositAccount = { id: number; provider: string; bank_code: string; bank_name: string; account_number: string | null; account_name: string | null; currency_code: string; status: string; assigned_at: string | null };
 type DepositBank = { code: string; name: string; provider: string; currency_code: string };
+type PaymentRequest = { id: number; provider: string; method: string; status: string; amount_minor: number; currency_code: string; client_reference: string; provider_reference: string | null; purpose: string | null; review_reason?: string | null; decision_reason?: string | null; created_at: string; reviewed_at?: string | null; approved_at?: string | null; paid_confirmed_at?: string | null };
+type PayoutBank = { code: string; name: string; country?: string; supports_account_name_resolution?: boolean };
 type PendingAccountDiagnostic = { id: number; bank_name: string; bank_code: string; currency_code: string; status: string; created_at: string | null; age_minutes: number; recovery_attempts: number; last_recovery_at: string | null; last_recovery_result: string | null; has_provider_customer_reference: boolean; has_provider_account_reference: boolean; diagnostic_code: string; recommended_action: string; escalation: { id: number; status: string; created_at: string } | null };
 type ProviderDeposit = { id: number; provider: string; provider_transaction_id: string; provider_reference: string | null; amount_minor: number; currency_code: string; status: string; occurred_at: string | null; created_at: string; user_id: number | null; account?: { bank_name?: string; account_name_ciphertext?: string | null } | null; safe_metadata?: { channel?: string; account_matched?: boolean } | null };
 type DashboardSummary = { user: DashboardProfile; active_workspaces_count: number; workspaces: Array<{ id: number; name: string; country_code: string; status: string; role: string }>; active_groups_count: number; groups: Array<{ id: number; business_id: number; name: string; description: string | null; currency_code: string; status: string; role: string; joined_at: string | null }>; confirmed_contribution_totals: Array<{ currency_code: string; total_minor: number; records_count: number }>; recent_contributions: Array<{ id: number; thrift_group_id: number; user_id: number; amount_minor: number; currency_code: string; status: string; collection_method: string; reference: string | null; created_at: string; confirmed_at: string | null; group: { id: number; name: string; currency_code: string } | null }>; upcoming_obligations_count: number; upcoming_obligations: Array<{ id: number; status: string; expected_amount_minor: number; currency_code: string; due_on: string | null; group: { id: number; name: string } | null }>; financial_data_status: string; message: string };
@@ -171,6 +174,23 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   const [pinError, setPinError] = useState('');
   const [pinMessage, setPinMessage] = useState('');
   const [pinSaving, setPinSaving] = useState(false);
+  const [depositRequests, setDepositRequests] = useState<PaymentRequest[]>([]);
+  const [payoutRequests, setPayoutRequests] = useState<PaymentRequest[]>([]);
+  const [paymentBanks, setPaymentBanks] = useState<PayoutBank[]>([]);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+  const [paymentError, setPaymentError] = useState('');
+  const [paymentMessage, setPaymentMessage] = useState('');
+  const [depositAmount, setDepositAmount] = useState('');
+  const [depositPurpose, setDepositPurpose] = useState('');
+  const [depositPin, setDepositPin] = useState('');
+  const [depositReference, setDepositReference] = useState('');
+  const [payoutAmount, setPayoutAmount] = useState('');
+  const [payoutPurpose, setPayoutPurpose] = useState('');
+  const [payoutPin, setPayoutPin] = useState('');
+  const [payoutReference, setPayoutReference] = useState('');
+  const [payoutBankCode, setPayoutBankCode] = useState('');
+  const [payoutAccountNumber, setPayoutAccountNumber] = useState('');
 
   useEffect(() => {
     if (!token) { setAuthLoading(false); setProfile(null); setDashboardData(null); return; }
