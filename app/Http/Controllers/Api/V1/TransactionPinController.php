@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 
 class TransactionPinController extends Controller
 {
@@ -20,6 +22,37 @@ class TransactionPinController extends Controller
         ]]);
     }
 
+    public function sendChallenge(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (! $user->hasVerifiedEmail()) {
+            return response()->json(['message' => 'Verify your email before changing transaction security settings.'], 403);
+        }
+
+        $recent = DB::table('transaction_pin_challenges')->where('user_id', $user->id)
+            ->where('created_at', '>=', now()->subMinutes(15))->count();
+        if ($recent >= 3) {
+            return response()->json(['message' => 'Too many verification codes requested. Wait 15 minutes before trying again.'], 429);
+        }
+
+        $code = (string) random_int(100000, 999999);
+        $id = DB::table('transaction_pin_challenges')->insertGetId([
+            'user_id' => $user->id, 'code_hash' => Hash::make($code), 'attempts' => 0,
+            'expires_at' => now()->addMinutes(10), 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        try {
+            Mail::raw("Your transaction PIN verification code is {$code}. It expires in 10 minutes. Do not share it.", function ($message) use ($user): void {
+                $message->to($user->email)->subject('Transaction PIN verification code');
+            });
+        } catch (\Throwable $exception) {
+            DB::table('transaction_pin_challenges')->where('id', $id)->update(['consumed_at' => now(), 'updated_at' => now()]);
+            report($exception);
+            return response()->json(['message' => 'Verification email could not be sent. Check email delivery settings.'], 503);
+        }
+
+        return response()->json(['message' => 'A verification code was sent to your verified email. It expires in 10 minutes.']);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -30,10 +63,25 @@ class TransactionPinController extends Controller
             'pin' => ['required', 'digits:4'],
             'current_password' => ['required', 'string', 'max:255'],
             'current_pin' => ['nullable', 'digits:4'],
+            'otp_code' => ['required', 'digits:6'],
         ]);
 
         if (! Hash::check($data['current_password'], $user->password)) {
             return response()->json(['message' => 'Password confirmation failed.'], 422);
+        }
+
+        $challenge = DB::table('transaction_pin_challenges')->where('user_id', $user->id)
+            ->whereNull('consumed_at')->where('expires_at', '>', now())
+            ->where('attempts', '<', 5)->orderByDesc('id')->first();
+        if (! $challenge) {
+            return response()->json(['message' => 'Request a fresh email verification code before changing your PIN.'], 422);
+        }
+        if (! Hash::check($data['otp_code'], $challenge->code_hash)) {
+            $attempts = (int) $challenge->attempts + 1;
+            DB::table('transaction_pin_challenges')->where('id', $challenge->id)->update([
+                'attempts' => $attempts, 'consumed_at' => $attempts >= 5 ? now() : null, 'updated_at' => now(),
+            ]);
+            return response()->json(['message' => 'The email verification code is incorrect or expired.'], 422);
         }
 
         if (filled($user->transaction_pin_hash)) {
@@ -49,6 +97,8 @@ class TransactionPinController extends Controller
             return response()->json(['message' => 'Choose a less predictable four-digit PIN.'], 422);
         }
 
+        DB::table('transaction_pin_challenges')->where('id', $challenge->id)
+            ->whereNull('consumed_at')->update(['consumed_at' => now(), 'updated_at' => now()]);
         $user->forceFill([
             'transaction_pin_hash' => Hash::make($data['pin']),
             'transaction_pin_set_at' => now(),
