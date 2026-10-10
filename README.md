@@ -109,3 +109,20 @@ Members can set a four-digit transaction PIN under **Security & PIN**. PIN hashe
 The member dashboard's **Deposit & payout** screen uses the authenticated workspace APIs to create manual-review requests and list each member's latest 25 deposit and payout requests. Both request forms require an amount, a human-readable purpose, and the transaction PIN. A blank reference is generated client-side; a supplied reference is used for idempotency and cannot be reused with changed amount/purpose details. Payout submission first resolves the selected Nigerian bank and 10-digit account number through the configured Paystack account-name lookup, then submits the verification record ID to the manual payout request API.
 
 Request history shows request status, reference, purpose, amount, and available reviewer notes. The screen does not treat approval as proof of settlement. Provider-based live deposit/payout execution remains disabled, and these manual request flows never credit a wallet or initiate a bank transfer.
+
+
+### Member savings wallet and withdrawal ledger
+
+Member wallets are scoped by business, user, and currency. The ledger uses integer minor units and immutable, balanced debit/credit journals with business-scoped idempotency keys. A contribution is credited only after independent confirmation for cash collections, or after an authorized exact-match decision in the reconciliation workflow for non-cash collections. Merely recording a collection, creating a deposit request, or receiving an unreviewed provider webhook does not credit the wallet.
+
+A manual withdrawal request requires a verified destination account, transaction PIN, purpose, and sufficient wallet balance. The wallet is debited in the same database transaction that creates the payout request; duplicate idempotency references cannot debit it twice. Independent rejection or a separately reviewed failure before transfer evidence is submitted posts a compensating refund exactly once. A payout with ambiguous transfer evidence stays debited until the transfer is reconciled. Successful settlement is recorded only after independent bank-statement review, and settlement does not debit the wallet again.
+
+Member endpoints (under the authenticated business API):
+- `GET /api/v1/business/wallet?currency_code=NGN`
+- `GET /api/v1/business/wallet/ledger?currency_code=NGN&limit=20`
+
+Withdrawal lifecycle endpoints include the existing request/approval/evidence routes plus:
+- `POST /api/v1/business/payments/payouts/{id}/fail` — independently record a confirmed failed transfer before transfer evidence has been submitted; refunds the wallet once.
+- `POST /api/v1/business/payments/payouts/{id}/settle` — record successful settlement only after independent bank-statement review.
+
+Automatic provider withdrawals and live bank transfer execution remain disabled. The manual lifecycle records requests, approvals, evidence, settlement attestations, and wallet journals; it does not itself initiate a bank transfer. Re-run the full CI suite and complete the financial release gates before deployment or enabling live money movement.
