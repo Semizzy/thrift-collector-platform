@@ -68,6 +68,7 @@ Route::prefix('v1')->group(function (): void {
         Route::middleware(AuthenticateApiToken::class)->group(function (): void {
             Route::get('/me', [AuthController::class, 'me']);
             Route::get('/transaction-pin', [TransactionPinController::class, 'show']);
+            Route::post('/transaction-pin/challenge', [TransactionPinController::class, 'sendChallenge'])->middleware('throttle:3,15');
             Route::post('/transaction-pin', [TransactionPinController::class, 'store'])->middleware('throttle:5,1');
             Route::post('/logout', [AuthController::class, 'logout']);
             Route::post('/email/verification-notification', [AuthController::class, 'resendVerification'])->middleware('throttle:3,1');
