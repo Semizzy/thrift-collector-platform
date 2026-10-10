@@ -181,7 +181,7 @@ class PaymentWorkflowController extends Controller
                     'status' => 'requested', 'amount_minor' => $data['amount_minor'],
                     'currency_code' => $data['currency_code'], 'destination_ciphertext' => $destination]
             );
-            if ($payout->user_id !== $request->user()->id || $payout->amount_minor !== (int) $data['amount_minor'] || $payout->currency_code !== $data['currency_code']) {
+            if ($payout->user_id !== $request->user()->id || $payout->amount_minor !== (int) $data['amount_minor'] || $payout->currency_code !== $data['currency_code'] || $payout->destination_ciphertext !== $destination) {
                 abort(409, 'Idempotency reference was already used with different payout details.');
             }
             if ($payout->wasRecentlyCreated) PaymentOperationEvent::query()->create([
