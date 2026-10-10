@@ -421,7 +421,7 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
       const reference = payoutReference.trim() || newClientReference('PAY');
       const response = await fetch('/api/v1/business/payments/payouts', {
         method: 'POST', headers,
-        body: JSON.stringify({ provider: 'manual', amount_minor: amount, currency_code: dashboardData?.workspaces.find(workspace => String(workspace.id) === selectedBusinessId)?.country_code === 'GH' ? 'GHS' : 'NGN', client_reference: reference, purpose: payoutPurpose.trim(), transaction_pin: payoutPin, account_verification_id: resolveResult.data.id }),
+        body: JSON.stringify({ provider: 'manual', amount_minor: amount, currency_code: dashboardData?.workspaces.find(workspace => String(workspace.id) === selectedBusinessId)?.country_code === 'GH' ? 'GHS' : 'NGN', client_reference: reference, purpose: payoutPurpose.trim(), transaction_pin: payoutPin, account_verification_id: resolveResult.data.verification_id }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.message ?? 'Payout request could not be submitted.');
