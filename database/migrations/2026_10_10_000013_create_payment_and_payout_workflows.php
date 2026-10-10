@@ -50,7 +50,7 @@ return new class extends Migration {
             $table->string('status', 24)->default('requested');
             $table->unsignedBigInteger('amount_minor');
             $table->char('currency_code', 3);
-            $table->string('destination_ciphertext', 2000);
+            $table->text('destination_ciphertext');
             $table->string('client_reference', 100);
             $table->string('provider_reference', 160)->nullable();
             $table->foreignId('approved_by_user_id')->nullable()->constrained('users')->restrictOnDelete();
