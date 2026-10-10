@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ContributionCycle extends Model
 {
@@ -16,4 +17,5 @@ class ContributionCycle extends Model
 
     public function schedule(): BelongsTo { return $this->belongsTo(ContributionSchedule::class, 'contribution_schedule_id'); }
     public function group(): BelongsTo { return $this->belongsTo(ThriftGroup::class, 'thrift_group_id'); }
+    public function obligations(): HasMany { return $this->hasMany(ContributionCycleObligation::class, 'contribution_cycle_id'); }
 }
