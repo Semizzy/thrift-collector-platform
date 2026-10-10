@@ -92,3 +92,7 @@
 .pin-form input { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); font: inherit; letter-spacing: .12em; }
 .pin-form .button { margin-top: 8px; }
 .transaction-pin-panel > .panel-heading > svg { color: var(--green); flex: 0 0 auto; }
+
+.pin-otp-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: stretch; }
+.pin-otp-row .button { white-space: nowrap; }
+@media (max-width: 520px) { .pin-otp-row { grid-template-columns: 1fr; } }
