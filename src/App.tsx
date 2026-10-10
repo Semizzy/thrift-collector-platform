@@ -14,6 +14,7 @@ const userNav: NavItem[] = [
   { label: 'My groups', icon: Users },
   { label: 'Contributions', icon: Wallet },
   { label: 'Bank accounts', icon: Landmark },
+  { label: 'Deposit review', icon: ClipboardCheck },
   { label: 'Statements', icon: FileText },
   { label: 'Support & disputes', icon: CircleHelp },
 ];
@@ -121,6 +122,7 @@ function EmptyPanel({ icon: Icon, title, body }: { icon: LucideIcon; title: stri
 type DashboardProfile = { id: number; name: string; email: string; email_verified_at: string | null };
 type DepositAccount = { id: number; provider: string; bank_code: string; bank_name: string; account_number: string | null; account_name: string | null; currency_code: string; status: string; assigned_at: string | null };
 type DepositBank = { code: string; name: string; provider: string; currency_code: string };
+type ProviderDeposit = { id: number; provider: string; provider_transaction_id: string; provider_reference: string | null; amount_minor: number; currency_code: string; status: string; occurred_at: string | null; created_at: string; user_id: number | null; account?: { bank_name?: string; account_name_ciphertext?: string | null } | null; safe_metadata?: { channel?: string; account_matched?: boolean } | null };
 type DashboardSummary = { user: DashboardProfile; active_workspaces_count: number; workspaces: Array<{ id: number; name: string; country_code: string; status: string; role: string }>; active_groups_count: number; groups: Array<{ id: number; business_id: number; name: string; description: string | null; currency_code: string; status: string; role: string; joined_at: string | null }>; confirmed_contribution_totals: Array<{ currency_code: string; total_minor: number; records_count: number }>; recent_contributions: Array<{ id: number; thrift_group_id: number; user_id: number; amount_minor: number; currency_code: string; status: string; collection_method: string; reference: string | null; created_at: string; confirmed_at: string | null; group: { id: number; name: string; currency_code: string } | null }>; upcoming_obligations_count: number; upcoming_obligations: Array<{ id: number; status: string; expected_amount_minor: number; currency_code: string; due_on: string | null; group: { id: number; name: string } | null }>; financial_data_status: string; message: string };
 
 function UserDashboard({ active }: { active: string }) {
@@ -141,6 +143,13 @@ function UserDashboard({ active }: { active: string }) {
   const [accountError, setAccountError] = useState('');
   const [accountMessage, setAccountMessage] = useState('');
   const [bankError, setBankError] = useState('');
+  const [providerDeposits, setProviderDeposits] = useState<ProviderDeposit[]>([]);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewError, setReviewError] = useState('');
+  const [reviewMessage, setReviewMessage] = useState('');
+  const [reviewReason, setReviewReason] = useState('');
+  const [reviewingDepositId, setReviewingDepositId] = useState<number | null>(null);
+  const [reviewRefreshKey, setReviewRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!token) { setAuthLoading(false); setProfile(null); setDashboardData(null); return; }
@@ -193,6 +202,46 @@ function UserDashboard({ active }: { active: string }) {
       .finally(() => { if (!cancelled) setBanksLoading(false); });
     return () => { cancelled = true; };
   }, [token, selectedBusinessId]);
+
+  useEffect(() => {
+    if (!token || !selectedBusinessId || active !== 'Deposit review') return;
+    let cancelled = false;
+    setReviewLoading(true); setReviewError('');
+    fetch('/api/v1/business/payments/provider-deposits', {
+      headers: { Authorization: 'Bearer ' + token, Accept: 'application/json', 'X-Business-Id': selectedBusinessId },
+    }).then(async response => {
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message ?? (response.status === 403 ? 'Your business role does not have reconciliation review permission.' : 'Could not load provider deposit review queue.'));
+      return result as { data: { data: ProviderDeposit[] } };
+    }).then(result => { if (!cancelled) setProviderDeposits(result.data.data); })
+      .catch(error => { if (!cancelled) { setProviderDeposits([]); setReviewError(error instanceof Error ? error.message : 'Could not load provider deposit review queue.'); } })
+      .finally(() => { if (!cancelled) setReviewLoading(false); });
+    return () => { cancelled = true; };
+  }, [token, selectedBusinessId, active, reviewRefreshKey]);
+
+  async function reviewProviderDeposit(eventId: number, decision: 'confirm_evidence' | 'mark_conflict' | 'ignore') {
+    if (!token || !selectedBusinessId || reviewReason.trim().length < 8) {
+      setReviewError('Enter a review reason of at least 8 characters before recording a decision.');
+      return;
+    }
+    setReviewingDepositId(eventId); setReviewError(''); setReviewMessage('');
+    try {
+      const response = await fetch('/api/v1/business/payments/provider-deposits/' + eventId + '/review', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, Accept: 'application/json', 'Content-Type': 'application/json', 'X-Business-Id': selectedBusinessId },
+        body: JSON.stringify({ decision, reason: reviewReason.trim() }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message ?? 'Could not record the review decision.');
+      setProviderDeposits(current => current.filter(item => item.id !== eventId));
+      setReviewReason('');
+      setReviewMessage(result.message ?? 'Review decision recorded. No financial balance was changed.');
+    } catch (error) {
+      setReviewError(error instanceof Error ? error.message : 'Could not record the review decision.');
+    } finally {
+      setReviewingDepositId(null);
+    }
+  }
 
   async function addDepositAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -261,6 +310,28 @@ function UserDashboard({ active }: { active: string }) {
   if (authLoading && !profile) return <section className="auth-gate"><div className="auth-card"><strong>Loading your account…</strong><p>Checking your authenticated session.</p></div></section>;
   if (authError && !profile) return <section className="auth-gate"><div className="auth-card"><h1>Session needs attention</h1><p>{authError}</p><button className="button button-primary" onClick={signOut}>Return to sign in</button></div></section>;
 
+  const providerDepositReviewPanel = <section className="panel deposit-review-panel">
+    <div className="panel-heading"><div><h2>Provider deposit evidence</h2><p>Review signed Paystack transfer notifications against independent bank or provider records. Decisions do not post money.</p></div><button className="text-button" onClick={() => setReviewRefreshKey(v => v + 1)}><RefreshCw size={15} /> Refresh</button></div>
+    {reviewError && <p className="auth-error" role="alert">{reviewError}</p>}
+    {reviewMessage && <p className="account-success" role="status">{reviewMessage}</p>}
+    {reviewLoading ? <p className="muted">Loading provider evidence…</p> : providerDeposits.length ? <div className="deposit-review-list">
+      {providerDeposits.map(item => <article className="deposit-review-card" key={item.id}>
+        <div className="review-event-heading"><div><strong>{item.provider.toUpperCase()} transfer · #{item.id}</strong><p>{item.provider_reference || item.provider_transaction_id}</p></div><span className={'status-pill ' + (item.status === 'needs_review' ? 'status-neutral' : 'status-warning')}>{item.status.replaceAll('_', ' ')}</span></div>
+        <div className="review-event-meta"><strong>{new Intl.NumberFormat('en-NG', { style: 'currency', currency: item.currency_code }).format(item.amount_minor / 100)}</strong><span>{item.occurred_at ? new Date(item.occurred_at).toLocaleString() : new Date(item.created_at).toLocaleString()}</span></div>
+        <p className="muted review-event-note">Channel: {item.safe_metadata?.channel || 'not supplied'} · Account match: {item.safe_metadata?.account_matched ? 'matched' : 'unmatched'}</p>
+        <label className="review-reason-label">Evidence and decision reason
+          <textarea value={reviewReason} onChange={event => setReviewReason(event.target.value)} minLength={8} maxLength={500} rows={2} placeholder="Explain what you checked against the independent provider/bank record…" />
+        </label>
+        <div className="review-decision-actions">
+          <button className="button button-primary" disabled={reviewingDepositId !== null} onClick={() => void reviewProviderDeposit(item.id, 'confirm_evidence')}>{reviewingDepositId === item.id ? 'Saving…' : 'Confirm evidence'}</button>
+          <button className="button button-secondary" disabled={reviewingDepositId !== null} onClick={() => void reviewProviderDeposit(item.id, 'mark_conflict')}>Mark conflict</button>
+          <button className="text-button" disabled={reviewingDepositId !== null} onClick={() => void reviewProviderDeposit(item.id, 'ignore')}>Ignore</button>
+        </div>
+      </article>)}
+    </div> : <div className="deposit-empty"><ClipboardCheck size={23} /><strong>No pending provider deposits</strong><p>Unreviewed signed provider notifications will appear here for authorized business reviewers.</p></div>}
+    <p className="deposit-consent-note">A review records evidence status only. It does not verify final settlement or credit a member balance. The account holder cannot review their own event.</p>
+  </section>;
+
   const depositAccountsPanel = <section className="panel deposit-accounts-panel">
     <div className="panel-heading"><div><h2>Your dedicated deposit accounts</h2><p>Keep two or more bank accounts if supported by the provider. Deposits remain pending reconciliation until independently reviewed.</p></div><button className="text-button" onClick={() => { setAccountMessage(''); setAccountError(''); setAccountLoading(true); fetch('/api/v1/business/payments/deposit-accounts', { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json', 'X-Business-Id': selectedBusinessId } }).then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.message || 'Could not refresh accounts.'); setDepositAccounts(result.data); }).catch(error => setAccountError(error instanceof Error ? error.message : 'Could not refresh accounts.')).finally(() => setAccountLoading(false)); }}><RefreshCw size={15} /> Refresh</button></div>
     {dashboardData?.workspaces.length ? <label className="business-select-label">Workspace
@@ -292,6 +363,8 @@ function UserDashboard({ active }: { active: string }) {
 
   if (active === 'My groups' && dashboardData) return <><SectionHeading eyebrow="MEMBER WORKSPACE" title="My groups" description="Thrift groups where you have active membership." />{dashboardData.groups.length ? <div className="content-grid">{dashboardData.groups.map(group => <section className="panel" key={group.id}><div className="panel-heading"><div><h2>{group.name}</h2><p>{group.description || 'No group description provided.'}</p></div><span className="status-pill status-neutral">{group.status}</span></div><div className="stat-foot muted">{group.currency_code} · {group.role} · Group #{group.id}</div></section>)}</div> : <EmptyPanel icon={Users} title="No active thrift groups yet" body="When you join a thrift group, it will appear here." />}</>;
   if (active === 'Contributions' && dashboardData) return <><SectionHeading eyebrow="MEMBER WORKSPACE" title="Contributions" description="Your contribution records from groups you belong to." />{dashboardData.recent_contributions.length ? <section className="panel"><div className="panel-heading"><div><h2>Recent contribution records</h2><p>Record confirmation is not proof of bank deposit or provider settlement.</p></div></div><div className="contribution-list">{dashboardData.recent_contributions.map(record => <div className="check-row" key={record.id}><span className="check-number">{record.status === 'confirmed' ? <CheckCircle2 size={17} /> : <CalendarClock size={17} />}</span><div><strong>{record.group?.name ?? `Group #${record.thrift_group_id}`}</strong><p>{new Date(record.created_at).toLocaleDateString()} · {record.collection_method.replace('_', ' ')}</p></div><div className="contribution-amount"><strong>{new Intl.NumberFormat('en-NG', { style: 'currency', currency: record.currency_code }).format(record.amount_minor / 100)}</strong><small>{record.status}</small></div></div>)}</div></section> : <EmptyPanel icon={Wallet} title="No contribution records yet" body="Records will appear here when a permitted organizer or collector records a contribution for you." />}</>;
+
+  if (active === 'Deposit review') return <><SectionHeading eyebrow="BUSINESS WORKSPACE · AUTHORIZED REVIEWERS" title="Deposit review" description="Independently review provider notifications and record an auditable evidence decision." />{providerDepositReviewPanel}</>;
 
   if (active === 'Bank accounts') return <><SectionHeading eyebrow="MEMBER WORKSPACE" title="Bank accounts" description="Manage multiple dedicated accounts for receiving deposits into your thrift workspace." />{depositAccountsPanel}</>;
 
