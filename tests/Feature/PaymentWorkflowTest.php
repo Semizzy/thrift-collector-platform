@@ -9,6 +9,7 @@ use App\Models\UserDepositAccount;
 use App\Models\PaymentGatewayConfig;
 use App\Models\PersonalAccessToken;
 use App\Models\User;
+use App\Services\WalletLedgerService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
@@ -460,5 +461,178 @@ final class PaymentWorkflowTest extends TestCase
         $this->assertDatabaseCount('payout_requests', 0);
     }
 
+
+
+    public function test_withdrawal_debits_wallet_once_and_rejection_refunds_once(): void
+    {
+        [$owner, $reviewer, $business, $tokens] = $this->fixture();
+        $headers = ['X-Business-Id' => (string) $business->id];
+        $ledger = app(WalletLedgerService::class);
+        $ledger->creditContribution((int) $business->id, (int) $owner->id, 'NGN', 20000, 90001, (int) $reviewer->id);
+
+        $verification = BankAccountVerification::query()->create([
+            'business_id' => $business->id, 'user_id' => $owner->id, 'verification_provider' => 'paystack',
+            'bank_code' => '044', 'bank_name' => 'Access Bank', 'account_number_ciphertext' => '0123456789',
+            'account_name_ciphertext' => 'TEST ACCOUNT HOLDER', 'status' => 'verified',
+            'verified_at' => now(), 'expires_at' => now()->addMinutes(10),
+        ]);
+        $payload = [
+            'provider' => 'manual', 'amount_minor' => 8000, 'currency_code' => 'NGN',
+            'client_reference' => 'WALLET-PAY-001', 'purpose' => 'Emergency savings withdrawal',
+            'transaction_pin' => '2468', 'account_verification_id' => $verification->id,
+        ];
+
+        $created = $this->withToken($tokens[$owner->id])->withHeaders($headers)
+            ->postJson('/api/v1/business/payments/payouts', $payload)->assertCreated()
+            ->assertJsonPath('data.status', 'requested')
+            ->assertJsonPath('wallet_debit.status', 'posted');
+        $payoutId = $created->json('data.id');
+        $this->assertSame(12000, $ledger->balance((int) $business->id, (int) $owner->id, 'NGN'));
+
+        $this->withToken($tokens[$owner->id])->withHeaders($headers)
+            ->postJson('/api/v1/business/payments/payouts', $payload)->assertOk()
+            ->assertJsonPath('wallet_debit.status', 'already_posted');
+        $this->assertSame(12000, $ledger->balance((int) $business->id, (int) $owner->id, 'NGN'));
+        $this->assertDatabaseCount('payout_requests', 1);
+
+        $this->withToken($tokens[$reviewer->id])->withHeaders($headers)
+            ->postJson('/api/v1/business/payments/payouts/'.$payoutId.'/decision', [
+                'decision' => 'reject', 'reason' => 'Reject because the destination details require correction.',
+            ])->assertOk()->assertJsonPath('wallet_refund.status', 'posted');
+
+        $this->assertSame(20000, $ledger->balance((int) $business->id, (int) $owner->id, 'NGN'));
+        $this->assertDatabaseHas('payout_requests', ['id' => $payoutId, 'status' => 'rejected']);
+        $this->assertDatabaseHas('wallet_ledger_transactions', ['business_id' => $business->id, 'idempotency_key' => 'payout:'.$payoutId.':wallet-refund']);
+        $this->assertDatabaseCount('wallet_ledger_transactions', 3);
+    }
+
+    public function test_competing_withdrawals_cannot_spend_the_same_wallet_balance_twice(): void
+    {
+        [$owner, $reviewer, $business, $tokens] = $this->fixture();
+        $headers = ['X-Business-Id' => (string) $business->id];
+        $ledger = app(WalletLedgerService::class);
+        $ledger->creditContribution((int) $business->id, (int) $owner->id, 'NGN', 10000, 90002, (int) $reviewer->id);
+        $verification = BankAccountVerification::query()->create([
+            'business_id' => $business->id, 'user_id' => $owner->id, 'verification_provider' => 'paystack',
+            'bank_code' => '044', 'bank_name' => 'Access Bank', 'account_number_ciphertext' => '0123456789',
+            'account_name_ciphertext' => 'TEST ACCOUNT HOLDER', 'status' => 'verified',
+            'verified_at' => now(), 'expires_at' => now()->addMinutes(10),
+        ]);
+
+        $base = ['provider' => 'manual', 'amount_minor' => 7000, 'currency_code' => 'NGN',
+            'purpose' => 'Monthly savings withdrawal', 'transaction_pin' => '2468', 'account_verification_id' => $verification->id];
+        $this->withToken($tokens[$owner->id])->withHeaders($headers)->postJson('/api/v1/business/payments/payouts', [
+            ...$base, 'client_reference' => 'WALLET-RACE-A',
+        ])->assertCreated();
+        $this->withToken($tokens[$owner->id])->withHeaders($headers)->postJson('/api/v1/business/payments/payouts', [
+            ...$base, 'client_reference' => 'WALLET-RACE-B',
+        ])->assertUnprocessable()->assertJsonPath('message', 'Insufficient wallet balance for this withdrawal. No payout request was saved.');
+
+        $this->assertSame(3000, $ledger->balance((int) $business->id, (int) $owner->id, 'NGN'));
+        $this->assertDatabaseCount('payout_requests', 1);
+        $this->assertDatabaseCount('wallet_ledger_transactions', 2);
+        $this->assertDatabaseMissing('wallet_accounts', ['business_id' => $business->id, 'account_key' => 'wallet:'.$owner->id.':NGN', 'balance_minor' => -4000]);
+    }
+
+    public function test_successful_withdrawal_settlement_does_not_debit_wallet_twice(): void
+    {
+        [$owner, $approver, $business, $tokens] = $this->fixture();
+        $headers = ['X-Business-Id' => (string) $business->id];
+        $ledger = app(WalletLedgerService::class);
+        $ledger->creditContribution((int) $business->id, (int) $owner->id, 'NGN', 20000, 90003, (int) $approver->id);
+
+        $evidenceReviewer = User::query()->create(['name' => 'Evidence Reviewer', 'email' => 'evidence-reviewer@example.test', 'password' => 'strong-test-password']);
+        $settlementReviewer = User::query()->create(['name' => 'Settlement Reviewer', 'email' => 'settlement-reviewer@example.test', 'password' => 'strong-test-password']);
+        foreach ([$evidenceReviewer, $settlementReviewer] as $user) {
+            $user->forceFill(['email_verified_at' => now()])->save();
+            BusinessMembership::query()->create(['business_id' => $business->id, 'user_id' => $user->id,
+                'role' => 'business_manager', 'status' => 'active', 'joined_at' => now()]);
+            $plain = str_repeat($user->id === $evidenceReviewer->id ? 'e' : 's', 64);
+            PersonalAccessToken::query()->create(['user_id' => $user->id, 'name' => 'wallet-settlement-test',
+                'token_hash' => hash('sha256', $plain), 'expires_at' => now()->addDay()]);
+            $tokens[$user->id] = $plain;
+        }
+
+        $verification = BankAccountVerification::query()->create([
+            'business_id' => $business->id, 'user_id' => $owner->id, 'verification_provider' => 'paystack',
+            'bank_code' => '044', 'bank_name' => 'Access Bank', 'account_number_ciphertext' => '0123456789',
+            'account_name_ciphertext' => 'TEST ACCOUNT HOLDER', 'status' => 'verified',
+            'verified_at' => now(), 'expires_at' => now()->addMinutes(10),
+        ]);
+        $created = $this->withToken($tokens[$owner->id])->withHeaders($headers)->postJson('/api/v1/business/payments/payouts', [
+            'provider' => 'manual', 'amount_minor' => 5000, 'currency_code' => 'NGN',
+            'client_reference' => 'WALLET-SETTLE-001', 'purpose' => 'Approved savings withdrawal',
+            'transaction_pin' => '2468', 'account_verification_id' => $verification->id,
+        ])->assertCreated();
+        $payoutId = $created->json('data.id');
+
+        $this->withToken($tokens[$approver->id])->withHeaders($headers)->postJson('/api/v1/business/payments/payouts/'.$payoutId.'/decision', [
+            'decision' => 'approve', 'reason' => 'Approve for manual transfer processing.',
+        ])->assertOk();
+
+        $this->withToken($tokens[$evidenceReviewer->id])->withHeaders($headers)->postJson('/api/v1/business/payments/payouts/'.$payoutId.'/manual-payment-evidence', [
+            'reason' => 'Submitting the transfer reference for separate evidence review.',
+            'transfer_reference' => 'BANK-SETTLEMENT-001',
+        ])->assertOk();
+
+        $this->withToken($tokens[$settlementReviewer->id])->withHeaders($headers)->postJson('/api/v1/business/payments/payouts/'.$payoutId.'/manual-payment-evidence/review', [
+            'decision' => 'accept_evidence', 'reason' => 'Evidence reviewed; now checking independent bank statement.',
+        ])->assertOk()->assertJsonPath('data.status', 'manual_evidence_accepted_unsettled');
+
+        $this->withToken($tokens[$settlementReviewer->id])->withHeaders($headers)->postJson('/api/v1/business/payments/payouts/'.$payoutId.'/settle', [
+            'settlement_reference' => 'BANK-STATEMENT-SETTLEMENT-001',
+            'reason' => 'Matched the transfer to the independent bank statement.',
+        ])->assertOk()->assertJsonPath('data.status', 'settled')
+            ->assertJsonPath('ledger_posting.status', 'posted');
+
+        $this->assertSame(15000, $ledger->balance((int) $business->id, (int) $owner->id, 'NGN'));
+        $this->assertDatabaseHas('wallet_ledger_transactions', ['business_id' => $business->id, 'idempotency_key' => 'payout:'.$payoutId.':settlement']);
+        $this->assertDatabaseCount('payout_requests', 1);
+    }
+
+    public function test_confirmed_failure_after_approval_refunds_wallet_once(): void
+    {
+        [$owner, $approver, $business, $tokens] = $this->fixture();
+        $headers = ['X-Business-Id' => (string) $business->id];
+        $ledger = app(WalletLedgerService::class);
+        $ledger->creditContribution((int) $business->id, (int) $owner->id, 'NGN', 15000, 90004, (int) $approver->id);
+        $failureReviewer = User::query()->create(['name' => 'Failure Reviewer', 'email' => 'failure-reviewer@example.test', 'password' => 'strong-test-password']);
+        $failureReviewer->forceFill(['email_verified_at' => now()])->save();
+        BusinessMembership::query()->create(['business_id' => $business->id, 'user_id' => $failureReviewer->id,
+            'role' => 'business_manager', 'status' => 'active', 'joined_at' => now()]);
+        $plain = str_repeat('f', 64);
+        PersonalAccessToken::query()->create(['user_id' => $failureReviewer->id, 'name' => 'wallet-failure-test',
+            'token_hash' => hash('sha256', $plain), 'expires_at' => now()->addDay()]);
+        $verification = BankAccountVerification::query()->create([
+            'business_id' => $business->id, 'user_id' => $owner->id, 'verification_provider' => 'paystack',
+            'bank_code' => '044', 'bank_name' => 'Access Bank', 'account_number_ciphertext' => '0123456789',
+            'account_name_ciphertext' => 'TEST ACCOUNT HOLDER', 'status' => 'verified',
+            'verified_at' => now(), 'expires_at' => now()->addMinutes(10),
+        ]);
+        $created = $this->withToken($tokens[$owner->id])->withHeaders($headers)->postJson('/api/v1/business/payments/payouts', [
+            'provider' => 'manual', 'amount_minor' => 5000, 'currency_code' => 'NGN',
+            'client_reference' => 'WALLET-FAIL-001', 'purpose' => 'Failed savings withdrawal',
+            'transaction_pin' => '2468', 'account_verification_id' => $verification->id,
+        ])->assertCreated();
+        $payoutId = $created->json('data.id');
+        $this->withToken($tokens[$approver->id])->withHeaders($headers)->postJson('/api/v1/business/payments/payouts/'.$payoutId.'/decision', [
+            'decision' => 'approve', 'reason' => 'Approve for manual transfer processing.',
+        ])->assertOk();
+        $this->assertSame(10000, $ledger->balance((int) $business->id, (int) $owner->id, 'NGN'));
+
+        $this->withToken($plain)->withHeaders($headers)->postJson('/api/v1/business/payments/payouts/'.$payoutId.'/fail', [
+            'failure_reference' => 'BANK-FAILED-001',
+            'reason' => 'Bank rejected the transfer and no funds were sent.',
+        ])->assertOk()->assertJsonPath('data.status', 'failed_refunded')
+            ->assertJsonPath('wallet_refund.status', 'posted');
+        $this->assertSame(15000, $ledger->balance((int) $business->id, (int) $owner->id, 'NGN'));
+
+        $this->withToken($plain)->withHeaders($headers)->postJson('/api/v1/business/payments/payouts/'.$payoutId.'/fail', [
+            'failure_reference' => 'BANK-FAILED-001',
+            'reason' => 'Retry the same failure decision.',
+        ])->assertStatus(409);
+        $this->assertSame(15000, $ledger->balance((int) $business->id, (int) $owner->id, 'NGN'));
+        $this->assertDatabaseCount('wallet_ledger_transactions', 3);
+    }
 
 }
