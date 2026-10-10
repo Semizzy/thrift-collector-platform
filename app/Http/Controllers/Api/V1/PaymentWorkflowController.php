@@ -177,7 +177,7 @@ class PaymentWorkflowController extends Controller
             'verification_provider' => $verification->verification_provider,
             'verification_id' => $verification->id,
         ], JSON_THROW_ON_ERROR);
-        $payout = DB::transaction(function () use ($request, $business, $data, $destination, $verification, $ledger): PayoutRequest {
+        [$payout, $walletPosting] = DB::transaction(function () use ($request, $business, $data, $destination, $verification, $ledger): array {
             $payout = PayoutRequest::query()->firstOrCreate(
                 ['business_id' => $business->id, 'client_reference' => $data['client_reference']],
                 ['user_id' => $request->user()->id, 'provider' => 'manual', 'method' => 'manual',
@@ -202,7 +202,7 @@ class PaymentWorkflowController extends Controller
                 'actor_user_id' => $request->user()->id, 'event' => 'payout_requested',
                 'reason' => 'Purpose: '.trim($data['purpose']).'. Wallet balance debited and withdrawal entered independent approval; no bank transfer was initiated.', 'evidence' => ['purpose' => trim($data['purpose']), 'provider' => 'manual', 'bank_verification_id' => $verification->id, 'bank_code' => $verification->bank_code, 'wallet_ledger_transaction_id' => $walletPosting['transaction_id']], 'created_at' => now(),
             ]);
-            return $payout;
+            return [$payout, $walletPosting];
         });
         return response()->json(['data' => $payout, 'wallet_debit' => $walletPosting, 'message' => $payout->wasRecentlyCreated ? 'Withdrawal requested and deducted from your wallet. It awaits independent approval; no bank transfer has been initiated.' : 'This withdrawal request already exists; the wallet was not debited a second time.'], $payout->wasRecentlyCreated ? 201 : 200);
     }
