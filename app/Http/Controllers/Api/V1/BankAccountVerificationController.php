@@ -1,15 +1,15 @@
 <?php
 
-namespace App\\Http\\Controllers\\Api\\V1;
+namespace App\Http\Controllers\Api\V1;
 
-use App\\Http\\Controllers\\Controller;
-use App\\Models\\BankAccountVerification;
-use App\\Models\\PaymentGatewayConfig;
-use App\\Models\\PaymentOperationEvent;
-use Illuminate\\Http\\JsonResponse;
-use Illuminate\\Http\\Request;
-use Illuminate\\Support\\Facades\\Cache;
-use Illuminate\\Support\\Facades\\Http;
+use App\Http\Controllers\Controller;
+use App\Models\BankAccountVerification;
+use App\Models\PaymentGatewayConfig;
+use App\Models\PaymentOperationEvent;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 
 class BankAccountVerificationController extends Controller
 {
@@ -54,7 +54,7 @@ class BankAccountVerificationController extends Controller
                     $response = Http::acceptJson()->withToken($secret)->timeout(8)
                         ->get('https://api.paystack.co/bank', $query);
                     if (! $response->successful() || ! $response->json('status')) {
-                        throw new \\RuntimeException('Bank directory request failed.');
+                        throw new \RuntimeException('Bank directory request failed.');
                     }
                     foreach ((array) $response->json('data', []) as $bank) {
                         if (! empty($bank['name']) && ! empty($bank['code'])) {
@@ -74,7 +74,7 @@ class BankAccountVerificationController extends Controller
                 }
                 return array_values($all);
             });
-        } catch (\\Throwable $exception) {
+        } catch (\Throwable $exception) {
             report($exception);
             return response()->json(['message' => 'Bank directory provider is temporarily unavailable. Try again later.'], 502);
         }
@@ -102,7 +102,7 @@ class BankAccountVerificationController extends Controller
                 'account_number' => $data['account_number'],
                 'bank_code' => $data['bank_code'],
             ]);
-        } catch (\\Throwable $exception) {
+        } catch (\Throwable $exception) {
             report($exception);
             return response()->json(['message' => 'Account-name verification provider is temporarily unavailable. No account was marked verified.'], 502);
         }
