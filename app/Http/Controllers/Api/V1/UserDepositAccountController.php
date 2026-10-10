@@ -116,6 +116,24 @@ class UserDepositAccountController extends Controller
         $lastName = array_pop($nameParts);
         $middleName = implode(' ', $nameParts);
 
+        $record = UserDepositAccount::query()->firstOrCreate(
+            ['business_id' => $business->id, 'client_reference' => $data['client_reference']],
+            [
+                'user_id' => $user->id, 'provider' => 'paystack', 'bank_code' => $data['bank_code'],
+                'bank_name' => $data['bank_code'], 'currency_code' => $data['currency_code'] ?? 'NGN',
+                'status' => 'provisioning',
+            ]
+        );
+        if ($record->user_id !== $user->id || $record->bank_code !== $data['bank_code']) {
+            return response()->json(['message' => 'Idempotency reference was already used for a different account request.'], 409);
+        }
+        if (! $record->wasRecentlyCreated) {
+            return response()->json([
+                'data' => $this->present($record),
+                'message' => $record->status === 'active' ? 'Existing dedicated account returned.' : 'An account request with this reference already exists; no duplicate provider request was sent.',
+            ], $record->status === 'active' ? 200 : 202);
+        }
+
         try {
             $customerResponse = Http::acceptJson()->withToken($config['secret_key'])->timeout(10)
                 ->get('https://api.paystack.co/customer/'.rawurlencode($user->email));
@@ -127,12 +145,14 @@ class UserDepositAccountController extends Controller
                 $customerResponse = Http::acceptJson()->withToken($config['secret_key'])->timeout(10)
                     ->post('https://api.paystack.co/customer', $customerPayload);
                 if (! $customerResponse->successful() || ! $customerResponse->json('status') || ! is_array($customerResponse->json('data'))) {
+                    $record->forceFill(['status' => 'failed'])->save();
                     return response()->json(['message' => 'The provider could not create or retrieve the customer record. No deposit account was assigned.'], 502);
                 }
                 $customer = $customerResponse->json('data');
             }
             $customerCode = $customer['customer_code'] ?? null;
             if (! is_string($customerCode) || $customerCode === '') {
+                $record->forceFill(['status' => 'failed'])->save();
                 return response()->json(['message' => 'The provider did not return a customer reference. No deposit account was assigned.'], 502);
             }
 
@@ -144,6 +164,7 @@ class UserDepositAccountController extends Controller
                     'last_name' => $lastName,
                 ]);
             if (! $assignment->successful() || ! $assignment->json('status')) {
+                $record->forceFill(['status' => 'failed'])->save();
                 return response()->json(['message' => 'The provider did not assign this bank account. Try another supported bank or contact support.'], 422);
             }
             $account = (array) $assignment->json('data', []);
@@ -154,10 +175,7 @@ class UserDepositAccountController extends Controller
             $bankName = (string) ($bank['name'] ?? $data['bank_code']);
             $assigned = $accountNumber !== '' && $accountName !== '' && (($account['assigned'] ?? true) === true);
 
-            $record = UserDepositAccount::query()->create([
-                'business_id' => $business->id,
-                'user_id' => $user->id,
-                'provider' => 'paystack',
+            $record->forceFill([
                 'provider_account_id' => $providerAccountId,
                 'provider_customer_id' => $customerCode,
                 'bank_code' => (string) ($bank['slug'] ?? $data['bank_code']),
@@ -167,9 +185,8 @@ class UserDepositAccountController extends Controller
                 'account_name_ciphertext' => $assigned ? $accountName : null,
                 'currency_code' => (string) ($account['currency'] ?? $data['currency_code'] ?? 'NGN'),
                 'status' => $assigned ? 'active' : 'provisioning',
-                'client_reference' => $data['client_reference'],
                 'assigned_at' => $assigned ? now() : null,
-            ]);
+            ])->save();
             PaymentOperationEvent::query()->create([
                 'business_id' => $business->id,
                 'operation_type' => 'user_deposit_account',
@@ -185,6 +202,7 @@ class UserDepositAccountController extends Controller
                 'message' => $assigned ? 'Dedicated deposit account assigned.' : 'Account assignment is pending provider confirmation.',
             ], $assigned ? 201 : 202);
         } catch (\Throwable $exception) {
+            $record->forceFill(['status' => 'failed'])->save();
             report($exception);
             return response()->json(['message' => 'Dedicated account provider is temporarily unavailable. No account was marked active.'], 502);
         }
