@@ -645,15 +645,15 @@ final class PaymentWorkflowTest extends TestCase
         $this->assertSame(15000, $ledger->balance((int) $business->id, (int) $owner->id, 'NGN'));
         $this->assertDatabaseCount('wallet_ledger_transactions', 3);
 
-        $journalIds = \\Illuminate\\Support\\Facades\\DB::table('wallet_ledger_transactions')
+        $journalIds = \Illuminate\\Support\\Facades\\DB::table('wallet_ledger_transactions')
             ->where('business_id', $business->id)->pluck('id');
         foreach ($journalIds as $journalId) {
-            $debits = (int) \\Illuminate\\Support\\Facades\\DB::table('wallet_ledger_entries')
+            $debits = (int) \Illuminate\\Support\\Facades\\DB::table('wallet_ledger_entries')
                 ->where('wallet_ledger_transaction_id', $journalId)->where('direction', 'debit')->sum('amount_minor');
-            $credits = (int) \\Illuminate\\Support\\Facades\\DB::table('wallet_ledger_entries')
+            $credits = (int) \Illuminate\\Support\\Facades\\DB::table('wallet_ledger_entries')
                 ->where('wallet_ledger_transaction_id', $journalId)->where('direction', 'credit')->sum('amount_minor');
             $this->assertSame($debits, $credits, 'Ledger transaction '.$journalId.' must balance.');
-            $this->assertSame(2, \\Illuminate\\Support\\Facades\\DB::table('wallet_ledger_entries')
+            $this->assertSame(2, \Illuminate\\Support\\Facades\\DB::table('wallet_ledger_entries')
                 ->where('wallet_ledger_transaction_id', $journalId)->count(), 'Wallet journal should contain exactly two posting lines.');
         }
     }
