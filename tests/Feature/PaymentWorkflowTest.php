@@ -4,6 +4,9 @@ namespace Tests\Feature;
 
 use App\Models\Business;
 use App\Models\BusinessMembership;
+use App\Models\ContributionRecord;
+use App\Models\ThriftGroup;
+use App\Models\ThriftGroupMembership;
 use App\Models\BankAccountVerification;
 use App\Models\UserDepositAccount;
 use App\Models\PaymentGatewayConfig;
@@ -633,6 +636,43 @@ final class PaymentWorkflowTest extends TestCase
         ])->assertStatus(409);
         $this->assertSame(15000, $ledger->balance((int) $business->id, (int) $owner->id, 'NGN'));
         $this->assertDatabaseCount('wallet_ledger_transactions', 3);
+    }
+
+
+    public function test_independently_confirmed_cash_savings_credit_member_wallet_once(): void
+    {
+        [$owner, $reviewer, $business, $tokens] = $this->fixture();
+        $group = ThriftGroup::query()->create([
+            'business_id' => $business->id, 'name' => 'Monthly Savings', 'currency_code' => 'NGN',
+            'status' => 'active', 'created_by_user_id' => $owner->id,
+        ]);
+        foreach ([$owner, $reviewer] as $user) {
+            ThriftGroupMembership::query()->create([
+                'thrift_group_id' => $group->id, 'user_id' => $user->id, 'role' => 'member',
+                'status' => 'active', 'added_by_user_id' => $owner->id, 'joined_at' => now(),
+            ]);
+        }
+        $record = ContributionRecord::query()->create([
+            'thrift_group_id' => $group->id, 'user_id' => $owner->id, 'recorded_by_user_id' => $owner->id,
+            'amount_minor' => 12500, 'currency_code' => 'NGN', 'status' => 'recorded',
+            'collection_method' => 'cash', 'reference' => 'CASH-WALLET-001',
+        ]);
+        $ledger = app(WalletLedgerService::class);
+        $this->assertSame(0, $ledger->balance((int) $business->id, (int) $owner->id, 'NGN'));
+
+        $headers = ['X-Business-Id' => (string) $business->id];
+        $this->withToken($tokens[$reviewer->id])->withHeaders($headers)
+            ->postJson('/api/v1/business/groups/'.$group->id.'/contributions/'.$record->id.'/confirm')
+            ->assertOk()->assertJsonPath('wallet_posting.status', 'posted');
+
+        $this->assertSame(12500, $ledger->balance((int) $business->id, (int) $owner->id, 'NGN'));
+        $this->assertDatabaseHas('wallet_ledger_transactions', [
+            'business_id' => $business->id, 'idempotency_key' => 'contribution:'.$record->id.':wallet-credit',
+        ]);
+        $this->withToken($tokens[$reviewer->id])->withHeaders($headers)
+            ->postJson('/api/v1/business/groups/'.$group->id.'/contributions/'.$record->id.'/confirm')
+            ->assertStatus(409);
+        $this->assertSame(12500, $ledger->balance((int) $business->id, (int) $owner->id, 'NGN'));
     }
 
 }
