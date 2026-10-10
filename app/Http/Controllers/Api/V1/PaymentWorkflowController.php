@@ -263,6 +263,89 @@ class PaymentWorkflowController extends Controller
         });
     }
 
+    public function settleManualPayout(Request $request, int $payoutId, WalletLedgerService $ledger): JsonResponse
+    {
+        $business = $request->attributes->get('current_business');
+        $data = $request->validate([
+            'settlement_reference' => ['required', 'string', 'min:4', 'max:160'],
+            'reason' => ['required', 'string', 'min:8', 'max:500'],
+        ]);
+
+        return DB::transaction(function () use ($request, $business, $payoutId, $data, $ledger): JsonResponse {
+            $payout = PayoutRequest::query()->where('business_id', $business->id)->whereKey($payoutId)->lockForUpdate()->firstOrFail();
+            if ($payout->status !== 'manual_evidence_accepted_unsettled') {
+                return response()->json(['message' => 'Only accepted payout evidence awaiting independent bank-statement reconciliation can be settled.'], 409);
+            }
+            if (in_array($request->user()->id, [$payout->user_id, $payout->approved_by_user_id, $payout->paid_confirmed_by_user_id], true)) {
+                return response()->json(['message' => 'The requester, approver, and evidence submitter cannot confirm settlement.'], 403);
+            }
+            if (! $ledger->hasWithdrawalDebit((int) $business->id, (int) $payout->id)) {
+                return response()->json(['message' => 'This payout has no matching wallet debit; settlement is blocked pending financial investigation.'], 409);
+            }
+
+            $posting = $ledger->settleWithdrawal(
+                (int) $business->id, $payout->currency_code, (int) $payout->amount_minor,
+                (int) $payout->id, (int) $request->user()->id, trim($data['settlement_reference'])
+            );
+            $payout->forceFill([
+                'status' => 'settled',
+                'decision_reason' => trim($data['reason']).' Settlement reference: '.trim($data['settlement_reference']),
+            ])->save();
+            PaymentOperationEvent::query()->create([
+                'business_id' => $business->id, 'operation_type' => 'payout', 'operation_id' => $payout->id,
+                'actor_user_id' => $request->user()->id, 'event' => 'payout_settled',
+                'reason' => trim($data['reason']),
+                'evidence' => ['settlement_reference' => trim($data['settlement_reference']), 'wallet_ledger_transaction_id' => $posting['transaction_id'], 'independent_reconciliation' => true],
+                'created_at' => now(),
+            ]);
+
+            return response()->json(['data' => $payout, 'ledger_posting' => $posting,
+                'message' => 'Withdrawal settlement recorded after independent bank-statement review. The wallet is not debited a second time.']);
+        });
+    }
+
+    public function failManualPayout(Request $request, int $payoutId, WalletLedgerService $ledger): JsonResponse
+    {
+        $business = $request->attributes->get('current_business');
+        $data = $request->validate([
+            'failure_reference' => ['required', 'string', 'min:4', 'max:160'],
+            'reason' => ['required', 'string', 'min:8', 'max:500'],
+        ]);
+
+        return DB::transaction(function () use ($request, $business, $payoutId, $data, $ledger): JsonResponse {
+            $payout = PayoutRequest::query()->where('business_id', $business->id)->whereKey($payoutId)->lockForUpdate()->firstOrFail();
+            if ($payout->status !== 'approved_manual_execution_pending') {
+                return response()->json(['message' => 'Only an approved payout with no submitted transfer evidence can be marked failed here. Ambiguous transfers require reconciliation; no automatic refund was made.'], 409);
+            }
+            if (in_array($request->user()->id, [$payout->user_id, $payout->approved_by_user_id], true)) {
+                return response()->json(['message' => 'The requester and approver cannot independently review payout failure.'], 403);
+            }
+            if (! $ledger->hasWithdrawalDebit((int) $business->id, (int) $payout->id)) {
+                return response()->json(['message' => 'This payout has no matching wallet debit; financial investigation is required.'], 409);
+            }
+
+            $refund = $ledger->refundWithdrawal(
+                (int) $business->id, (int) $payout->user_id, $payout->currency_code,
+                (int) $payout->amount_minor, (int) $payout->id, (int) $request->user()->id,
+                trim($data['reason']).' Failure reference: '.trim($data['failure_reference'])
+            );
+            $payout->forceFill([
+                'status' => 'failed_refunded',
+                'decision_reason' => trim($data['reason']).' Failure reference: '.trim($data['failure_reference']),
+            ])->save();
+            PaymentOperationEvent::query()->create([
+                'business_id' => $business->id, 'operation_type' => 'payout', 'operation_id' => $payout->id,
+                'actor_user_id' => $request->user()->id, 'event' => 'payout_failed_wallet_refunded',
+                'reason' => trim($data['reason']),
+                'evidence' => ['failure_reference' => trim($data['failure_reference']), 'wallet_refund' => $refund, 'transfer_evidence_submitted' => false],
+                'created_at' => now(),
+            ]);
+
+            return response()->json(['data' => $payout, 'wallet_refund' => $refund,
+                'message' => 'Payout failure recorded before transfer evidence was submitted. The wallet refund was posted exactly once.']);
+        });
+    }
+
     public function reviewManualPayoutEvidence(Request $request, int $payoutId): JsonResponse
     {
         $business = $request->attributes->get('current_business');
