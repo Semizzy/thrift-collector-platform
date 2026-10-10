@@ -309,8 +309,8 @@ final class PaymentWorkflowTest extends TestCase
             'business_id' => $business->id, 'user_id' => $owner->id, 'provider' => 'paystack',
             'provider_customer_id' => 'CUS-RECOVERY-01', 'bank_code' => 'wema-bank', 'bank_name' => 'Wema Bank',
             'currency_code' => 'NGN', 'status' => 'provisioning', 'client_reference' => 'RECOVERY-001',
-            'created_at' => now()->subMinutes(30), 'updated_at' => now()->subMinutes(30),
         ]);
+        $account->forceFill(['created_at' => now()->subMinutes(30)])->save();
         Http::fake([
             'https://api.paystack.co/dedicated_account*' => Http::response([
                 'status' => true, 'data' => [[
