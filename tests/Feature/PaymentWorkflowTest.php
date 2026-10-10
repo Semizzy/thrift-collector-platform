@@ -444,4 +444,21 @@ final class PaymentWorkflowTest extends TestCase
     }
 
 
+
+    public function test_incorrect_transaction_pin_cannot_create_deposit_or_payout_request(): void
+    {
+        [$owner, , $business, $tokens] = $this->fixture();
+        $headers = ['X-Business-Id' => (string) $business->id];
+        $this->withToken($tokens[$owner->id])->withHeaders($headers)
+            ->postJson('/api/v1/business/payments/deposits', [
+                'provider' => 'manual', 'amount_minor' => 5000, 'currency_code' => 'NGN',
+                'client_reference' => 'WRONG-PIN-DEP-01', 'purpose' => 'Monthly contribution',
+                'transaction_pin' => '9999',
+            ])->assertUnprocessable()->assertJsonPath('message', 'Transaction PIN is incorrect.');
+
+        $this->assertDatabaseCount('deposit_intents', 0);
+        $this->assertDatabaseCount('payout_requests', 0);
+    }
+
+
 }
