@@ -538,6 +538,34 @@ final class PaymentWorkflowTest extends TestCase
         $this->assertDatabaseMissing('wallet_accounts', ['business_id' => $business->id, 'account_key' => 'wallet:'.$owner->id.':NGN', 'balance_minor' => -4000]);
     }
 
+    public function test_atomic_wallet_debit_guard_rolls_back_journal_when_balance_changes_during_withdrawal(): void
+    {
+        if (\\Illuminate\\Support\\Facades\\DB::getDriverName() !== 'sqlite') {
+            $this->markTestSkipped('This race-injection test uses a SQLite trigger; production concurrency is protected by row locks and the conditional debit update.');
+        }
+
+        [$owner, $reviewer, $business] = $this->fixture();
+        $ledger = app(WalletLedgerService::class);
+        $ledger->creditContribution((int) $business->id, (int) $owner->id, 'NGN', 10000, 90010, (int) $reviewer->id);
+
+        $walletKey = 'wallet:'.$owner->id.':NGN';
+        \\Illuminate\\Support\\Facades\\DB::unprepared(
+            "CREATE TRIGGER simulate_wallet_debit_race BEFORE UPDATE OF balance_minor ON wallet_accounts ".
+            "WHEN OLD.account_key = '".$walletKey."' AND NEW.balance_minor < OLD.balance_minor ".
+            "BEGIN SELECT RAISE(IGNORE); END"
+        );
+
+        $posting = $ledger->debitWithdrawal((int) $business->id, (int) $owner->id, 'NGN', 6000, 90011, (int) $reviewer->id);
+
+        $this->assertSame('insufficient_balance', $posting['status']);
+        $this->assertSame(10000, $ledger->balance((int) $business->id, (int) $owner->id, 'NGN'));
+        $this->assertDatabaseMissing('wallet_ledger_transactions', [
+            'business_id' => $business->id, 'idempotency_key' => 'payout:90011:wallet-debit',
+        ]);
+        $this->assertSame(0, (int) \\Illuminate\\Support\\Facades\\DB::table('wallet_accounts')
+            ->where('business_id', $business->id)->where('account_key', 'payout-payable:NGN')->value('balance_minor'));
+    }
+
     public function test_successful_withdrawal_settlement_does_not_debit_wallet_twice(): void
     {
         [$owner, $approver, $business, $tokens] = $this->fixture();
