@@ -6,6 +6,7 @@ use App\Models\Business;
 use App\Models\BusinessMembership;
 use App\Models\BusinessAuditEvent;
 use App\Models\ContributionCycle;
+use App\Models\ContributionCycleObligation;
 use App\Models\ContributionRecord;
 use App\Models\ContributionRecordAdjustment;
 use App\Models\ContributionSchedule;
@@ -82,14 +83,17 @@ final class ContributionCycleAndAdjustmentTest extends TestCase
         $this->withToken($token)->withHeader('X-Business-Id', (string) $business->id)
             ->postJson($path, $payload)->assertOk()
             ->assertJsonPath('data.created_count', 3)
-            ->assertJsonPath('data.existing_count', 0);
+            ->assertJsonPath('data.existing_count', 0)
+            ->assertJsonPath('data.obligations_created_count', 6);
 
         $this->withToken($token)->withHeader('X-Business-Id', (string) $business->id)
             ->postJson($path, $payload)->assertOk()
             ->assertJsonPath('data.created_count', 0)
-            ->assertJsonPath('data.existing_count', 3);
+            ->assertJsonPath('data.existing_count', 3)
+            ->assertJsonPath('data.obligations_created_count', 0);
 
         $this->assertSame(3, ContributionCycle::query()->count());
+        $this->assertSame(6, ContributionCycleObligation::query()->count());
         $this->assertSame(0, ContributionRecord::query()->count());
         $this->assertDatabaseHas('business_audit_events', ['action' => 'contribution_cycles.generated', 'actor_user_id' => $owner->id]);
     }
