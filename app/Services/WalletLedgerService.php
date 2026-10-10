@@ -121,7 +121,7 @@ class WalletLedgerService
             $existing = DB::table('wallet_ledger_transactions')->where('business_id', $businessId)
                 ->where('idempotency_key', $idempotencyKey)->first();
             if ($existing) {
-                if (! $this->existingPostingMatches($existing, $businessId, $currency, $sourceType, $sourceId, $lines)) {
+                if (! $this->existingPostingMatches($existing, $businessId, $currency, $sourceType, $sourceId, $lines, $metadata)) {
                     throw new InvalidArgumentException('An idempotency key cannot be reused with different ledger details.');
                 }
                 return ['status' => 'already_posted', 'transaction_id' => $existing->id];
@@ -185,12 +185,13 @@ class WalletLedgerService
         }
     }
 
-    private function existingPostingMatches(object $transaction, int $businessId, string $currency, string $sourceType, int $sourceId, array $lines): bool
+    private function existingPostingMatches(object $transaction, int $businessId, string $currency, string $sourceType, int $sourceId, array $lines, array $metadata): bool
     {
         if ((int) $transaction->business_id !== $businessId
             || $transaction->currency_code !== $currency
             || $transaction->source_type !== $sourceType
-            || (int) $transaction->source_id !== $sourceId) {
+            || (int) $transaction->source_id !== $sourceId
+            || (json_decode((string) $transaction->metadata, true) ?? []) !== $metadata) {
             return false;
         }
 
