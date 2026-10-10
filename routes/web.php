@@ -8,3 +8,4 @@ Route::get('/', fn () => response()->json([
 ]));
 
 Route::view('/reset-password', 'auth.reset-password');
+Route::view('/accept-business-invitation', 'auth.accept-business-invitation');
