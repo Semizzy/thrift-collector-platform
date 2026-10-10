@@ -366,4 +366,26 @@ final class PaymentWorkflowTest extends TestCase
     }
 
 
+
+    public function test_transaction_pin_change_requires_email_otp_and_stores_only_hash(): void
+    {
+        [$owner, , , $tokens] = $this->fixture();
+        \\Illuminate\\Support\\Facades\\DB::table('transaction_pin_challenges')->insert([
+            'user_id' => $owner->id, 'code_hash' => Hash::make('654321'), 'attempts' => 0,
+            'expires_at' => now()->addMinutes(10), 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $this->withToken($tokens[$owner->id])->postJson('/api/v1/auth/transaction-pin', [
+            'pin' => '5831', 'current_pin' => '2468', 'current_password' => 'strong-test-password',
+        ])->assertUnprocessable();
+
+        $this->withToken($tokens[$owner->id])->postJson('/api/v1/auth/transaction-pin', [
+            'pin' => '5831', 'current_pin' => '2468', 'current_password' => 'strong-test-password', 'otp_code' => '654321',
+        ])->assertOk()->assertJsonPath('data.configured', true);
+
+        $stored = \\Illuminate\\Support\\Facades\\DB::table('users')->where('id', $owner->id)->value('transaction_pin_hash');
+        $this->assertNotSame('5831', $stored);
+        $this->assertTrue(Hash::check('5831', $stored));
+    }
+
 }
