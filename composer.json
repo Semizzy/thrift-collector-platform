@@ -12,17 +12,19 @@
   },
   "autoload": {
     "psr-4": {
-      "App\\": "app/"
+      "App\\\\": "app/"
     }
   },
   "autoload-dev": {
     "psr-4": {
-      "Tests\\": "tests/"
+      "Tests\\\\": "tests/",
+      "Database\\\\Seeders\\\\": "database/seeders/",
+      "Database\\\\Factories\\\\": "database/factories/"
     }
   },
   "scripts": {
     "test": "phpunit",
-    "lint": "find app tests -name '*.php' -print0 | xargs -0 -n1 php -l"
+    "lint": "find . -path ./vendor -prune -o -path ./.git -prune -o -name '*.php' -print0 | xargs -0 -n1 php -l"
   },
   "config": {
     "sort-packages": true,
