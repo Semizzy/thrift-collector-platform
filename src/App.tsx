@@ -16,6 +16,7 @@ const userNav: NavItem[] = [
   { label: 'Bank accounts', icon: Landmark },
   { label: 'Deposit review', icon: ClipboardCheck },
   { label: 'Account operations', icon: AlertTriangle },
+  { label: 'Security & PIN', icon: ShieldCheck },
   { label: 'Statements', icon: FileText },
   { label: 'Support & disputes', icon: CircleHelp },
 ];
@@ -160,6 +161,14 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   const [escalationReason, setEscalationReason] = useState('');
   const [escalatingAccountId, setEscalatingAccountId] = useState<number | null>(null);
   const [diagnosticsRefreshKey, setDiagnosticsRefreshKey] = useState(0);
+  const [pinConfigured, setPinConfigured] = useState(false);
+  const [pinSetAt, setPinSetAt] = useState<string | null>(null);
+  const [pinValue, setPinValue] = useState('');
+  const [pinCurrent, setPinCurrent] = useState('');
+  const [pinPassword, setPinPassword] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [pinMessage, setPinMessage] = useState('');
+  const [pinSaving, setPinSaving] = useState(false);
 
   useEffect(() => {
     if (!token) { setAuthLoading(false); setProfile(null); setDashboardData(null); return; }
@@ -329,6 +338,39 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
     }
   }
 
+  useEffect(() => {
+    if (!token || active !== 'Security & PIN') return;
+    let cancelled = false;
+    fetch('/api/v1/auth/transaction-pin', { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } })
+      .then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.message ?? 'Could not load transaction PIN status.'); return result as { data: { configured: boolean; set_at: string | null } }; })
+      .then(result => { if (!cancelled) { setPinConfigured(result.data.configured); setPinSetAt(result.data.set_at); setPinError(''); } })
+      .catch(error => { if (!cancelled) setPinError(error instanceof Error ? error.message : 'Could not load transaction PIN status.'); });
+    return () => { cancelled = true; };
+  }, [token, active]);
+
+  async function saveTransactionPin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPinError(''); setPinMessage('');
+    if (pinValue.length !== 4 || !/^\\d{4}$/.test(pinValue)) { setPinError('Enter exactly four digits.'); return; }
+    setPinSaving(true);
+    try {
+      const response = await fetch('/api/v1/auth/transaction-pin', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: pinValue, current_password: pinPassword, ...(pinConfigured ? { current_pin: pinCurrent } : {}) }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message ?? 'Could not save transaction PIN.');
+      setPinConfigured(true); setPinSetAt(result.data?.set_at ?? new Date().toISOString());
+      setPinValue(''); setPinCurrent(''); setPinPassword('');
+      setPinMessage(result.message ?? 'Transaction PIN saved securely.');
+    } catch (error) {
+      setPinError(error instanceof Error ? error.message : 'Could not save transaction PIN.');
+    } finally {
+      setPinSaving(false);
+    }
+  }
+
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setAuthError(''); setAuthLoading(true);
     try {
@@ -387,6 +429,22 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
     <p className="deposit-consent-note">A review records evidence status only. It does not verify final settlement or credit a member balance. The account holder cannot review their own event.</p>
   </section>;
 
+  const transactionPinPanel = <section className="panel transaction-pin-panel">
+    <div className="panel-heading"><div><h2>Transaction PIN</h2><p>Protect payment requests with a four-digit PIN. The PIN is stored as a password hash and is never displayed again.</p></div><ShieldCheck size={22} /></div>
+    <div className="pin-status-row"><span className={'status-pill ' + (pinConfigured ? 'status-neutral' : 'status-warning')}>{pinConfigured ? 'PIN configured' : 'PIN setup required'}</span>{pinSetAt && <span className="muted">Last set {new Date(pinSetAt).toLocaleDateString()}</span>}</div>
+    {pinError && <p className="auth-error" role="alert">{pinError}</p>}
+    {pinMessage && <p className="account-success" role="status">{pinMessage}</p>}
+    <form className="pin-form" onSubmit={saveTransactionPin}>
+      {pinConfigured && <><label htmlFor="pin-current">Current transaction PIN</label><input id="pin-current" inputMode="numeric" autoComplete="off" type="password" pattern="[0-9]{4}" maxLength={4} required value={pinCurrent} onChange={event => setPinCurrent(event.target.value.replace(/\\D/g, '').slice(0, 4))} /></>}
+      <label htmlFor="pin-new">{pinConfigured ? 'New transaction PIN' : 'Create transaction PIN'}</label>
+      <input id="pin-new" inputMode="numeric" autoComplete="new-password" type="password" pattern="[0-9]{4}" maxLength={4} required value={pinValue} onChange={event => setPinValue(event.target.value.replace(/\\D/g, '').slice(0, 4))} />
+      <label htmlFor="pin-password">Confirm your account password</label>
+      <input id="pin-password" autoComplete="current-password" type="password" required value={pinPassword} onChange={event => setPinPassword(event.target.value)} />
+      <button className="button button-primary" type="submit" disabled={pinSaving}>{pinSaving ? 'Saving securely…' : pinConfigured ? 'Change transaction PIN' : 'Set transaction PIN'}</button>
+    </form>
+    <p className="deposit-consent-note">Payment requests require this PIN and a transaction purpose. Five incorrect attempts trigger a 15-minute transaction lock. Choose a non-obvious PIN. PIN changes currently require password re-authentication and your existing PIN.</p>
+  </section>;
+
   const accountOperationsPanel = <section className="panel deposit-review-panel">
     <div className="panel-heading"><div><h2>Pending assignment diagnostics</h2><p>Accounts pending for at least an hour or after three recovery attempts. No account numbers, names, credentials, or PIN values are shown.</p></div><button className="text-button" onClick={() => setDiagnosticsRefreshKey(value => value + 1)}><RefreshCw size={15} /> Refresh</button></div>
     {diagnosticsError && <p className="auth-error" role="alert">{diagnosticsError}</p>}
@@ -443,6 +501,8 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   if (active === 'Deposit review') return <><SectionHeading eyebrow="BUSINESS WORKSPACE · AUTHORIZED REVIEWERS" title="Deposit review" description="Independently review provider notifications and record an auditable evidence decision." />{providerDepositReviewPanel}</>;
 
   if (active === 'Account operations') return <><SectionHeading eyebrow="BUSINESS WORKSPACE · AUTHORIZED OPERATIONS" title="Pending account operations" description="Diagnose repeated or long-running provider assignments and escalate them for support follow-up." />{accountOperationsPanel}</>;
+
+  if (active === 'Security & PIN') return <><SectionHeading eyebrow="ACCOUNT SECURITY" title="Security & transaction PIN" description="Set or update the PIN used to confirm payment requests." />{transactionPinPanel}</>;
 
   if (active === 'Bank accounts') return <><SectionHeading eyebrow="MEMBER WORKSPACE" title="Bank accounts" description="Manage multiple dedicated accounts for receiving deposits into your thrift workspace." />{depositAccountsPanel}</>;
 
