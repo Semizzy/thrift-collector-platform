@@ -67,7 +67,7 @@ class BusinessMembershipController extends Controller
         }
 
         $existingUser = \App\Models\User::query()->whereRaw('LOWER(email) = ?', [$email])->first();
-        if ($existingUser && $business->memberships()->where('user_id', $existingUser->id)->exists()) {
+        if ($existingUser && $business->memberships()->where('user_id', $existingUser->id)->where('status', 'active')->exists()) {
             return response()->json(['message' => 'This user already has a membership record for this business.'], 409);
         }
 
