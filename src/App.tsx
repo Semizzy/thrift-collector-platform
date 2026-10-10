@@ -378,7 +378,7 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
     Promise.all([
       fetch('/api/v1/business/payments/deposits', { headers }).then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.message ?? 'Could not load deposit history.'); return result.data.data as PaymentRequest[]; }),
       fetch('/api/v1/business/payments/payouts', { headers }).then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.message ?? 'Could not load payout history.'); return result.data.data as PaymentRequest[]; }),
-      fetch('/api/v1/business/payments/banks', { headers }).then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.message ?? 'Bank directory unavailable. An administrator must configure provider credentials.'); return result.data as PayoutBank[]; }),
+      fetch('/api/v1/business/payments/banks', { headers }).then(async response => { const result = await response.json(); if (!response.ok) return [] as PayoutBank[]; return result.data as PayoutBank[]; }).catch(() => [] as PayoutBank[]),
     ]).then(([deposits, payouts, banks]) => {
       if (!cancelled) { setDepositRequests(deposits); setPayoutRequests(payouts); setPaymentBanks(banks); if (!payoutBankCode && banks.length) setPayoutBankCode(banks[0].code); }
     }).catch(error => { if (!cancelled) setPaymentError(error instanceof Error ? error.message : 'Could not load payment requests.'); })
@@ -553,6 +553,7 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
     </section>
     <section className="panel">
       <div className="panel-heading"><div><h2>Request a payout</h2><p>Verify a bank account and submit a payout request for independent approval. No transfer is executed.</p></div><ArrowRight size={22} /></div>
+      {!paymentBanks.length && <p className="deposit-consent-note">The bank directory is unavailable. Payout requests require administrator-configured account verification credentials; deposit requests and history remain available.</p>}
       <form className="pin-form" onSubmit={submitPayoutRequest}>
         <label htmlFor="payout-amount">Amount ({dashboardData?.workspaces.find(workspace => String(workspace.id) === selectedBusinessId)?.country_code === 'GH' ? 'GHS' : 'NGN'})</label><input id="payout-amount" type="number" min="1" step="0.01" required value={payoutAmount} onChange={event => setPayoutAmount(event.target.value)} />
         <label htmlFor="payout-purpose">Purpose of payout</label><input id="payout-purpose" minLength={3} maxLength={255} required value={payoutPurpose} onChange={event => setPayoutPurpose(event.target.value)} placeholder="e.g. approved savings withdrawal" />
