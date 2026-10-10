@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Business;
 use App\Models\BusinessMembership;
 use App\Models\BankAccountVerification;
+use App\Models\UserDepositAccount;
 use App\Models\PaymentGatewayConfig;
 use App\Models\PersonalAccessToken;
 use App\Models\User;
@@ -108,6 +109,52 @@ final class PaymentWorkflowTest extends TestCase
         $this->assertDatabaseHas('payment_operation_events', ['operation_type' => 'payout', 'operation_id' => $payoutId, 'event' => 'payout_approved_manual_execution_pending']);
     }
 
+
+
+    public function test_user_can_have_multiple_dedicated_deposit_accounts_from_different_banks(): void
+    {
+        [$owner, , $business, $tokens] = $this->fixture();
+        foreach ([
+            ['bank_code' => 'wema-bank', 'bank_name' => 'Wema Bank', 'account_number' => '0123456789', 'provider_id' => 'dva-1001'],
+            ['bank_code' => 'titan-paystack', 'bank_name' => 'Titan Paystack', 'account_number' => '9876543210', 'provider_id' => 'dva-1002'],
+        ] as $index => $bank) {
+            UserDepositAccount::query()->create([
+                'business_id' => $business->id, 'user_id' => $owner->id, 'provider' => 'paystack',
+                'provider_account_id' => $bank['provider_id'], 'provider_customer_id' => 'CUS-TEST',
+                'bank_code' => $bank['bank_code'], 'bank_name' => $bank['bank_name'],
+                'account_number_ciphertext' => $bank['account_number'],
+                'account_number_hash' => hash('sha256', $bank['account_number']),
+                'account_name_ciphertext' => 'TEST USER NAME', 'currency_code' => 'NGN',
+                'status' => 'active', 'client_reference' => 'DVA-TEST-'.($index + 1),
+                'assigned_at' => now(),
+            ]);
+        }
+
+        $this->withToken($tokens[$owner->id])->withHeader('X-Business-Id', (string) $business->id)
+            ->getJson('/api/v1/business/payments/deposit-accounts')->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('meta.multiple_accounts_allowed', true)
+            ->assertJsonFragment(['bank_name' => 'Wema Bank'])
+            ->assertJsonFragment(['bank_name' => 'Titan Paystack']);
+    }
+
+    public function test_dedicated_account_creation_stays_disabled_without_explicit_admin_enablement(): void
+    {
+        [$owner, , $business, $tokens] = $this->fixture();
+        PaymentGatewayConfig::query()->create([
+            'business_id' => $business->id, 'provider' => 'paystack', 'direction' => 'deposit',
+            'status' => 'disabled', 'public_config' => ['environment' => 'test'],
+            'credentials_ciphertext' => json_encode(['secret_key' => 'not-a-real-secret'], JSON_THROW_ON_ERROR),
+            'updated_by_user_id' => $owner->id,
+        ]);
+
+        $this->withToken($tokens[$owner->id])->withHeader('X-Business-Id', (string) $business->id)
+            ->postJson('/api/v1/business/payments/deposit-accounts', [
+                'bank_code' => 'wema-bank', 'currency_code' => 'NGN',
+                'client_reference' => 'DVA-REQUEST-001', 'consent' => true,
+            ])->assertStatus(503);
+        $this->assertDatabaseCount('user_deposit_accounts', 0);
+    }
 
     public function test_account_name_resolution_returns_provider_verified_name_and_stores_sensitive_values_encrypted(): void
     {
