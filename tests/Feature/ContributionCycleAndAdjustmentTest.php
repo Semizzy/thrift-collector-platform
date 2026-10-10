@@ -41,6 +41,8 @@ final class ContributionCycleAndAdjustmentTest extends TestCase
             'name' => 'Independent Reviewer', 'email' => 'schedule-reviewer@example.test',
             'password' => 'a-strong-test-password', 'email_verified_at' => now(),
         ]);
+        $owner->forceFill(['email_verified_at' => now()])->save();
+        $reviewer->forceFill(['email_verified_at' => now()])->save();
         $business = Business::query()->create([
             'name' => 'Cycle Test Business', 'slug' => 'cycle-test-business',
             'country_code' => 'NG', 'status' => 'active', 'created_by_user_id' => $owner->id,
