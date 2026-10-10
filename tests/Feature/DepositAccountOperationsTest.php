@@ -39,9 +39,8 @@ final class DepositAccountOperationsTest extends TestCase
             'provider_customer_id' => 'CUS-STUCK-001', 'bank_code' => 'wema-bank',
             'bank_name' => 'Wema Bank', 'currency_code' => 'NGN',
             'status' => 'provisioning', 'client_reference' => 'STUCK-001',
-            'recovery_attempts' => 12, 'last_recovery_result' => 'still_pending',
         ]);
-        $account->forceFill(['created_at' => now()->subHours(3)])->save();
+        $account->forceFill(['created_at' => now()->subHours(3), 'recovery_attempts' => 12, 'last_recovery_result' => 'still_pending'])->save();
         $headers = ['X-Business-Id' => (string) $business->id];
 
         $this->withToken($plain)->withHeaders($headers)
