@@ -4,7 +4,7 @@ Multi-tenant software for daily thrift collection and rotating Ajo/Esusu groups,
 
 ## Current stage
 
-The Laravel 12/PHP foundation, versioned API, authentication and business-membership security foundations, country configuration, and automated checks are in progress. The complete product and clients are not yet production-ready. Do not use this foundation to record real customer funds.
+The Laravel 12/PHP foundation, versioned API, authentication and business-membership security foundations, country configuration, and automated checks are in progress. The actual user and platform-admin dashboard interfaces are not yet implemented; see the responsive dashboard acceptance checklist before building them. The complete product is not production-ready. Do not use this foundation to record real customer funds.
 
 ## Product principles
 
@@ -26,6 +26,7 @@ The Laravel 12/PHP foundation, versioned API, authentication and business-member
 - Database: MySQL/MariaDB.
 - Hosting: cPanel/shared hosting first, with VPS support; no mandatory Docker, Redis, Supervisor, or root access.
 - Scheduled tasks: cPanel Cron Jobs; database-backed queues where asynchronous jobs are needed.
+- Responsive web UI: mobile-first user and admin layouts, with server-side authorization and viewport/accessibility checks.
 
 ## Local checks
 
@@ -40,15 +41,17 @@ Requirements: PHP 8.2+ and Composer 2.
 
 Run destructive migration commands only against a disposable local/test database, never production.
 
-## cPanel deployment
+## Deployment and UI requirements
 
-Read [the cPanel deployment and release checklist](docs/cpanel-deployment.md) before configuring a hosting account. Confirm the host's PHP CLI version, extensions, database version, document-root options, cron path, and resource limits rather than assuming a plan supports them.
+- [cPanel deployment and release checklist](docs/cpanel-deployment.md)
+- [Responsive user/admin dashboard requirements](docs/responsive-dashboards.md)
+
+Confirm the host's PHP CLI version, extensions, database version, document-root options, cron path, and resource limits rather than assuming a plan supports them. Dashboard requirements are a specification until actual views, authorization, and UI tests are implemented.
 
 ## Product documentation
 
 - [Architecture](docs/architecture.md)
 - [Financial invariants](docs/financial-invariants.md)
 - [Roadmap](docs/roadmap.md)
-- [cPanel deployment and release checklist](docs/cpanel-deployment.md)
 
 Do not enable a payment provider or capability until official documentation, sandbox behavior, webhook verification, transaction-status verification, settlement semantics, currencies, limits, and country/legal readiness have been checked and tested. Real payment execution and custody remain disabled until the security, reconciliation, and legal release gates pass.
