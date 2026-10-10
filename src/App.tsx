@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import {
   Activity, ArrowDownLeft, ArrowRight, Bell, CalendarClock, CheckCircle2,
   ChevronDown, CircleHelp, ClipboardCheck, CreditCard, FileText, Home,
-  LayoutDashboard, Menu, Moon, Search, Settings, ShieldCheck,
+  LayoutDashboard, LogOut, Menu, Moon, Search, Settings, ShieldCheck,
   Sun, Users, Wallet, X, type LucideIcon,
 } from 'lucide-react';
 
@@ -117,7 +117,73 @@ function EmptyPanel({ icon: Icon, title, body }: { icon: LucideIcon; title: stri
   return <div className="empty-panel"><div className="empty-icon"><Icon size={23} /></div><strong>{title}</strong><p>{body}</p></div>;
 }
 
+type DashboardProfile = { id: number; name: string; email: string; email_verified_at: string | null };
+type DashboardSummary = { user: DashboardProfile; active_workspaces_count: number; workspaces: Array<{ id: number; name: string; country_code: string; status: string; role: string }>; financial_data_status: string; message: string };
+
 function UserDashboard({ active }: { active: string }) {
+  const [token, setToken] = useState(() => sessionStorage.getItem('tcp_access_token') ?? '');
+  const [profile, setProfile] = useState<DashboardProfile | null>(null);
+  const [workspaceCount, setWorkspaceCount] = useState<number | null>(null);
+  const [authLoading, setAuthLoading] = useState(Boolean(token));
+  const [authError, setAuthError] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
+  useEffect(() => {
+    if (!token) { setAuthLoading(false); setProfile(null); setWorkspaceCount(null); return; }
+    let cancelled = false;
+    setAuthLoading(true);
+    fetch('/api/v1/dashboard/summary', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } })
+      .then(async response => {
+        if (!response.ok) throw new Error(response.status === 401 ? 'Your session expired. Please sign in again.' : 'Could not load your authenticated account data.');
+        return response.json() as Promise<{ data: DashboardSummary }>;
+      })
+      .then(result => {
+        if (!cancelled) { setProfile(result.data.user); setWorkspaceCount(result.data.active_workspaces_count); setAuthError(''); }
+      })
+      .catch(error => {
+        if (!cancelled) { sessionStorage.removeItem('tcp_access_token'); setToken(''); setAuthError(error instanceof Error ? error.message : 'Please sign in to continue.'); }
+      })
+      .finally(() => { if (!cancelled) setAuthLoading(false); });
+    return () => { cancelled = true; };
+  }, [token]);
+
+  async function signIn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setAuthError(''); setAuthLoading(true);
+    try {
+      const response = await fetch('/api/v1/auth/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message ?? result.errors?.email?.[0] ?? 'Sign in failed. Check your details and try again.');
+      sessionStorage.setItem('tcp_access_token', result.access_token);
+      setToken(result.access_token); setPassword('');
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Sign in failed.'); setAuthLoading(false);
+    }
+  }
+
+  async function signOut() {
+    if (token) {
+      try { await fetch('/api/v1/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } }); } catch { /* Clear local session even if the network is unavailable. */ }
+    }
+    sessionStorage.removeItem('tcp_access_token'); setToken(''); setProfile(null); setWorkspaceCount(null);
+  }
+
+  if (!token) return <section className="auth-gate"><div className="auth-card">
+    <div className="brand-mark auth-brand"><Wallet size={22} /></div><div className="eyebrow">MEMBER ACCESS</div><h1>Welcome back.</h1>
+    <p>Sign in to load your account details from the authenticated platform API.</p>
+    <form className="auth-form" onSubmit={signIn}>
+      <label htmlFor="member-email">Email address</label><input id="member-email" type="email" autoComplete="email" required value={email} onChange={event => setEmail(event.target.value)} />
+      <label htmlFor="member-password">Password</label><input id="member-password" type="password" autoComplete="current-password" required value={password} onChange={event => setPassword(event.target.value)} />
+      {authError && <p className="auth-error" role="alert">{authError}</p>}
+      <button className="button button-primary auth-submit" type="submit" disabled={authLoading}>{authLoading ? 'Signing in…' : 'Sign in securely'} <ArrowRight size={16} /></button>
+    </form><p className="auth-footnote">Registration and email verification use the platform's existing API endpoints.</p>
+  </div></section>;
+  if (authLoading && !profile) return <section className="auth-gate"><div className="auth-card"><strong>Loading your account…</strong><p>Checking your authenticated session.</p></div></section>;
+  if (authError && !profile) return <section className="auth-gate"><div className="auth-card"><h1>Session needs attention</h1><p>{authError}</p><button className="button button-primary" onClick={signOut}>Return to sign in</button></div></section>;
+
   if (active !== 'Overview') {
     const details: Record<string, { title: string; desc: string; icon: LucideIcon }> = {
       'My groups': { title: 'Your groups will appear here', desc: 'Once you join or are invited to a group, its membership, contribution schedule and rules will be shown here.', icon: Users },
@@ -130,11 +196,11 @@ function UserDashboard({ active }: { active: string }) {
   }
 
   return <>
-    <SectionHeading eyebrow="MEMBER WORKSPACE" title="Your savings, at a glance." description="Welcome to your personal thrift workspace. Your confirmed activity will appear here." />
-    <div className="notice"><div className="notice-symbol"><Activity size={18} /></div><div><strong>Your account overview is being connected</strong><p>We will show verified account totals and group activity here. No financial figures are estimated or fabricated.</p></div></div>
+    <SectionHeading eyebrow="MEMBER WORKSPACE" title={profile ? `Welcome back, ${profile.name.split(' ')[0]}.` : 'Your savings, at a glance.'} description={profile ? `Signed in as ${profile.email}. Your dashboard uses authenticated account data.` : 'Welcome to your personal thrift workspace. Your confirmed activity will appear here.'} />
+    <div className="notice"><div className="notice-symbol"><Activity size={18} /></div><div className="notice-copy"><strong>Account data connected securely</strong><p>Your profile and active workspace count are loaded from the authenticated API. Financial totals remain hidden until verified contribution records exist.</p></div><button className="text-button signout-button" onClick={signOut}><LogOut size={15} /> Sign out</button></div>
     <section className="stats-grid" aria-label="Account summary">
       <article className="stat-card stat-featured"><div className="stat-top"><span>Total contributions recorded</span><span className="stat-icon"><Wallet size={19} /></span></div><div className="stat-value">— <small>NGN</small></div><div className="stat-foot"><span className="status-pill status-neutral"><Activity size={13} /> Awaiting account data</span></div></article>
-      <article className="stat-card"><div className="stat-top"><span>Active groups</span><span className="stat-icon green"><Users size={19} /></span></div><div className="stat-value">—</div><div className="stat-foot muted">Groups linked to your account</div></article>
+      <article className="stat-card"><div className="stat-top"><span>Active workspaces</span><span className="stat-icon green"><Users size={19} /></span></div><div className="stat-value">{workspaceCount ?? "—"}</div><div className="stat-foot muted">Active business workspaces linked to you</div></article>
       <article className="stat-card"><div className="stat-top"><span>Upcoming contributions</span><span className="stat-icon amber"><CalendarClock size={19} /></span></div><div className="stat-value">—</div><div className="stat-foot muted">Due dates from your group cycles</div></article>
       <article className="stat-card"><div className="stat-top"><span>Confirmed records</span><span className="stat-icon green"><CheckCircle2 size={19} /></span></div><div className="stat-value">—</div><div className="stat-foot muted">Only confirmed records count here</div></article>
     </section>
