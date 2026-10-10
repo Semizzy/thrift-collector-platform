@@ -4,7 +4,7 @@ Multi-tenant software for daily thrift collection and rotating Ajo/Esusu groups,
 
 ## Current stage
 
-The Laravel 12/PHP foundation, versioned API, authentication and business-membership security foundations, country configuration, and automated checks are in progress. The actual user and platform-admin dashboard interfaces are not yet implemented; see the responsive dashboard acceptance checklist before building them. The complete product is not production-ready. Do not use this foundation to record real customer funds.
+The Laravel 12/PHP foundation, versioned API, authentication and business-membership security foundations, country configuration, and automated checks are in progress. The first React/TypeScript Trust & Growth dashboard shell is now scaffolded with responsive user UI, empty states, light/dark mode, and a clearly marked admin preview. Dashboard data integrations and production admin authorization are not yet implemented. The complete product is not production-ready. Do not use this foundation to record real customer funds.
 
 ## Product principles
 
@@ -46,7 +46,7 @@ Run destructive migration commands only against a disposable local/test database
 - [cPanel deployment and release checklist](docs/cpanel-deployment.md)
 - [Responsive user/admin dashboard requirements](docs/responsive-dashboards.md)
 
-Confirm the host's PHP CLI version, extensions, database version, document-root options, cron path, and resource limits rather than assuming a plan supports them. Dashboard requirements are a specification until actual views, authorization, and UI tests are implemented.
+Confirm the host's PHP CLI version, extensions, database version, document-root options, cron path, and resource limits rather than assuming a plan supports them. The current dashboard shell is an early UI scaffold; the admin screen is preview-only and must not be treated as a protected administration interface. See the responsive dashboard specification for remaining acceptance checks.
 
 ## Product documentation
 
