@@ -60,6 +60,12 @@ class WalletLedgerService
             ], $actorId);
     }
 
+    public function hasWithdrawalDebit(int $businessId, int $payoutId): bool
+    {
+        return DB::table('wallet_ledger_transactions')->where('business_id', $businessId)
+            ->where('idempotency_key', 'payout:'.$payoutId.':wallet-debit')->exists();
+    }
+
     public function settleWithdrawal(int $businessId, string $currency, int $amount, int $payoutId, ?int $actorId, string $reference): array
     {
         return $this->post($businessId, $currency, 'payout_request', $payoutId,
@@ -82,7 +88,7 @@ class WalletLedgerService
         ?string $requiredWalletBalanceKey = null,
         array $metadata = [],
     ): array {
-        if ($currency !== strtoupper($currency) || strlen($currency) !== 3 || $amounts = array_filter($lines, fn ($line) => $line['amount'] < 1)) {
+        if ($currency !== strtoupper($currency) || strlen($currency) !== 3 || array_filter($lines, fn ($line) => $line['amount'] < 1)) {
             throw new InvalidArgumentException('Ledger entries require a valid currency and positive amounts.');
         }
         $debits = array_sum(array_map(fn ($line) => $line['direction'] === 'debit' ? $line['amount'] : 0, $lines));
