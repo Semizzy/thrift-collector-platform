@@ -52,6 +52,9 @@ class AuthController extends Controller
             if ($user->login_locked_until && $user->login_locked_until->isFuture()) {
                 return ['status' => 'locked', 'until' => $user->login_locked_until->toIso8601String()];
             }
+            if ($user->login_locked_until && ! $user->login_locked_until->isFuture()) {
+                $user->forceFill(['failed_login_attempts' => 0, 'login_locked_until' => null])->save();
+            }
 
             if (! Hash::check($data['password'], $user->password)) {
                 $attempts = min(3, (int) $user->failed_login_attempts + 1);
