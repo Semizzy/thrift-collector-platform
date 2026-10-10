@@ -105,15 +105,20 @@ class ContributionScheduleController extends Controller
                 };
                 if (! $matches) continue;
 
-                $cycle = ContributionCycle::query()->firstOrCreate([
-                    'contribution_schedule_id' => $schedule->id, 'due_on' => $date->toDateString(),
-                ], [
+                $inserted = DB::table('contribution_cycles')->insertOrIgnore([
+                    'contribution_schedule_id' => $schedule->id,
                     'thrift_group_id' => $schedule->thrift_group_id,
+                    'due_on' => $date->toDateString(),
                     'expected_amount_minor' => $schedule->amount_minor,
                     'currency_code' => $schedule->currency_code,
-                    'status' => 'scheduled', 'created_by_user_id' => $request->user()->id,
+                    'status' => 'scheduled',
+                    'created_by_user_id' => $request->user()->id,
+                    'created_at' => now(),
+                    'updated_at' => now(),
                 ]);
-                $cycle->wasRecentlyCreated ? $created++ : $existing++;
+                $cycle = ContributionCycle::query()->where('contribution_schedule_id', $schedule->id)
+                    ->whereDate('due_on', $date->toDateString())->firstOrFail();
+                $inserted === 1 ? $created++ : $existing++;
                 $members = ThriftGroupMembership::query()->where('thrift_group_id', $schedule->thrift_group_id)
                     ->where('status', 'active')->get(['user_id']);
                 foreach ($members as $member) {
