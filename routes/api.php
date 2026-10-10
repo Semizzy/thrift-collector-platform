@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\V1\ContributionAdjustmentController;
 use App\Http\Controllers\Api\V1\ReconciliationController;
 use App\Http\Controllers\Api\V1\PaymentWorkflowController;
 use App\Http\Controllers\Api\V1\BankAccountVerificationController;
+use App\Http\Controllers\Api\V1\UserDepositAccountController;
 use App\Http\Controllers\Api\V1\PlatformAdminController;
 use App\Http\Middleware\AuthenticateApiToken;
 use App\Http\Middleware\EnsureVerifiedEmail;
@@ -73,6 +74,11 @@ Route::prefix('v1')->group(function (): void {
 
         Route::middleware(RequireBusinessMembership::class)->prefix('business')->group(function (): void {
             Route::get('/current', [BusinessController::class, 'current']);
+            Route::get('/payments/deposit-accounts', [UserDepositAccountController::class, 'index']);
+            Route::get('/payments/deposit-accounts/banks', [UserDepositAccountController::class, 'availableBanks'])
+                ->middleware('throttle:30,1');
+            Route::post('/payments/deposit-accounts', [UserDepositAccountController::class, 'requestAccount'])
+                ->middleware('throttle:5,1');
             Route::get('/payments/banks', [BankAccountVerificationController::class, 'banks'])
                 ->middleware('throttle:30,1');
             Route::post('/payments/accounts/resolve', [BankAccountVerificationController::class, 'resolve'])
