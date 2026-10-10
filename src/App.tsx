@@ -361,6 +361,68 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   }
 
   useEffect(() => {
+    if (!token || !selectedBusinessId || active !== 'Deposit & payout') return;
+    let cancelled = false;
+    setPaymentLoading(true); setPaymentError('');
+    const headers = { Authorization: 'Bearer ' + token, Accept: 'application/json', 'X-Business-Id': selectedBusinessId };
+    Promise.all([
+      fetch('/api/v1/business/payments/deposits', { headers }).then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.message ?? 'Could not load deposit history.'); return result.data.data as PaymentRequest[]; }),
+      fetch('/api/v1/business/payments/payouts', { headers }).then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.message ?? 'Could not load payout history.'); return result.data.data as PaymentRequest[]; }),
+      fetch('/api/v1/business/payments/banks', { headers }).then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.message ?? 'Bank directory unavailable. An administrator must configure provider credentials.'); return result.data as PayoutBank[]; }),
+    ]).then(([deposits, payouts, banks]) => {
+      if (!cancelled) { setDepositRequests(deposits); setPayoutRequests(payouts); setPaymentBanks(banks); if (!payoutBankCode && banks.length) setPayoutBankCode(banks[0].code); }
+    }).catch(error => { if (!cancelled) setPaymentError(error instanceof Error ? error.message : 'Could not load payment requests.'); })
+      .finally(() => { if (!cancelled) setPaymentLoading(false); });
+    return () => { cancelled = true; };
+  }, [token, selectedBusinessId, active]);
+
+  function newClientReference(prefix: string) {
+    return prefix + '-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2, 9).toUpperCase();
+  }
+
+  async function submitDepositRequest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setPaymentError(''); setPaymentMessage('');
+    const amount = Math.round(Number(depositAmount) * 100);
+    if (!Number.isSafeInteger(amount) || amount < 1 || !depositPurpose.trim()) { setPaymentError('Enter a valid amount and explain the purpose.'); return; }
+    const reference = depositReference.trim() || newClientReference('DEP');
+    setPaymentSubmitting(true);
+    try {
+      const response = await fetch('/api/v1/business/payments/deposits', {
+        method: 'POST', headers: { Authorization: 'Bearer ' + token, Accept: 'application/json', 'Content-Type': 'application/json', 'X-Business-Id': selectedBusinessId },
+        body: JSON.stringify({ provider: 'manual', amount_minor: amount, currency_code: dashboardData?.workspaces.find(workspace => String(workspace.id) === selectedBusinessId)?.country_code === 'GH' ? 'GHS' : 'NGN', client_reference: reference, purpose: depositPurpose.trim(), transaction_pin: depositPin }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message ?? 'Deposit request could not be submitted.');
+      setPaymentMessage(result.message ?? 'Deposit request submitted for review.'); setDepositPin(''); setDepositAmount(''); setDepositPurpose(''); setDepositReference('');
+      setDepositRequests(current => [result.data as PaymentRequest, ...current.filter(item => item.id !== result.data.id)]);
+    } catch (error) { setPaymentError(error instanceof Error ? error.message : 'Deposit request could not be submitted.'); }
+    finally { setPaymentSubmitting(false); }
+  }
+
+  async function submitPayoutRequest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setPaymentError(''); setPaymentMessage('');
+    const amount = Math.round(Number(payoutAmount) * 100);
+    if (!Number.isSafeInteger(amount) || amount < 1 || payoutPurpose.trim().length < 3 || !/^[0-9]{10}$/.test(payoutAccountNumber)) { setPaymentError('Enter a valid amount, purpose and 10-digit destination account number.'); return; }
+    setPaymentSubmitting(true);
+    try {
+      const headers = { Authorization: 'Bearer ' + token, Accept: 'application/json', 'Content-Type': 'application/json', 'X-Business-Id': selectedBusinessId };
+      const resolveResponse = await fetch('/api/v1/business/payments/accounts/resolve', { method: 'POST', headers, body: JSON.stringify({ bank_code: payoutBankCode, account_number: payoutAccountNumber }) });
+      const resolveResult = await resolveResponse.json();
+      if (!resolveResponse.ok) throw new Error(resolveResult.message ?? 'Destination account verification failed.');
+      const reference = payoutReference.trim() || newClientReference('PAY');
+      const response = await fetch('/api/v1/business/payments/payouts', {
+        method: 'POST', headers,
+        body: JSON.stringify({ provider: 'manual', amount_minor: amount, currency_code: dashboardData?.workspaces.find(workspace => String(workspace.id) === selectedBusinessId)?.country_code === 'GH' ? 'GHS' : 'NGN', client_reference: reference, purpose: payoutPurpose.trim(), transaction_pin: payoutPin, account_verification_id: resolveResult.data.id }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message ?? 'Payout request could not be submitted.');
+      setPaymentMessage(result.message ?? 'Payout request submitted for independent review.'); setPayoutPin(''); setPayoutAmount(''); setPayoutPurpose(''); setPayoutReference(''); setPayoutAccountNumber('');
+      setPayoutRequests(current => [result.data as PaymentRequest, ...current.filter(item => item.id !== result.data.id)]);
+    } catch (error) { setPaymentError(error instanceof Error ? error.message : 'Payout request could not be submitted.'); }
+    finally { setPaymentSubmitting(false); }
+  }
+
+  useEffect(() => {
     if (!token || active !== 'Security & PIN') return;
     let cancelled = false;
     fetch('/api/v1/auth/transaction-pin', { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } })
