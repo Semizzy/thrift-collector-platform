@@ -9,6 +9,7 @@ use App\Models\DepositIntent;
 use App\Models\PaymentGatewayConfig;
 use App\Models\PaymentOperationEvent;
 use App\Models\PayoutRequest;
+use App\Services\WalletLedgerService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -143,7 +144,7 @@ class PaymentWorkflowController extends Controller
             ->where('user_id', $request->user()->id)->latest()->paginate(25)]);
     }
 
-    public function createPayout(Request $request): JsonResponse
+    public function createPayout(Request $request, WalletLedgerService $ledger): JsonResponse
     {
         $business = $request->attributes->get('current_business');
         $data = $request->validate([
@@ -174,7 +175,7 @@ class PaymentWorkflowController extends Controller
             'verification_provider' => $verification->verification_provider,
             'verification_id' => $verification->id,
         ], JSON_THROW_ON_ERROR);
-        $payout = DB::transaction(function () use ($request, $business, $data, $destination, $verification): PayoutRequest {
+        $payout = DB::transaction(function () use ($request, $business, $data, $destination, $verification, $ledger): PayoutRequest {
             $payout = PayoutRequest::query()->firstOrCreate(
                 ['business_id' => $business->id, 'client_reference' => $data['client_reference']],
                 ['user_id' => $request->user()->id, 'provider' => 'manual', 'method' => 'manual',
@@ -184,14 +185,24 @@ class PaymentWorkflowController extends Controller
             if ($payout->user_id !== $request->user()->id || $payout->amount_minor !== (int) $data['amount_minor'] || $payout->currency_code !== $data['currency_code'] || $payout->destination_ciphertext !== $destination) {
                 abort(409, 'Idempotency reference was already used with different payout details.');
             }
+            $walletPosting = ['status' => 'already_posted', 'transaction_id' => null];
+            if ($payout->wasRecentlyCreated) {
+                $walletPosting = $ledger->debitWithdrawal(
+                    (int) $business->id, (int) $request->user()->id, $payout->currency_code,
+                    (int) $payout->amount_minor, (int) $payout->id, (int) $request->user()->id
+                );
+                if ($walletPosting['status'] === 'insufficient_balance') {
+                    abort(422, 'Insufficient wallet balance for this withdrawal. No payout request was saved.');
+                }
+            }
             if ($payout->wasRecentlyCreated) PaymentOperationEvent::query()->create([
                 'business_id' => $business->id, 'operation_type' => 'payout', 'operation_id' => $payout->id,
                 'actor_user_id' => $request->user()->id, 'event' => 'payout_requested',
-                'reason' => 'Request recorded with a recently verified bank account; no funds were reserved or transferred.', 'evidence' => ['provider' => 'manual', 'bank_verification_id' => $verification->id, 'bank_code' => $verification->bank_code], 'created_at' => now(),
+                'reason' => 'Wallet balance debited and withdrawal entered independent approval; no bank transfer was initiated.', 'evidence' => ['provider' => 'manual', 'bank_verification_id' => $verification->id, 'bank_code' => $verification->bank_code, 'wallet_ledger_transaction_id' => $walletPosting['transaction_id']], 'created_at' => now(),
             ]);
             return $payout;
         });
-        return response()->json(['data' => $payout, 'message' => 'Payout request submitted for independent approval. No funds have been transferred.'], 201);
+        return response()->json(['data' => $payout, 'wallet_debit' => $walletPosting, 'message' => $payout->wasRecentlyCreated ? 'Withdrawal requested and deducted from your wallet. It awaits independent approval; no bank transfer has been initiated.' : 'This withdrawal request already exists; the wallet was not debited a second time.'], $payout->wasRecentlyCreated ? 201 : 200);
     }
 
     public function decidePayout(Request $request, int $payoutId): JsonResponse
