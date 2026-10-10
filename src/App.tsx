@@ -351,7 +351,7 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   async function saveTransactionPin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPinError(''); setPinMessage('');
-    if (pinValue.length !== 4 || !/^\\d{4}$/.test(pinValue)) { setPinError('Enter exactly four digits.'); return; }
+    if (pinValue.length !== 4 || !/^\d{4}$/.test(pinValue)) { setPinError('Enter exactly four digits.'); return; }
     setPinSaving(true);
     try {
       const response = await fetch('/api/v1/auth/transaction-pin', {
@@ -435,9 +435,9 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
     {pinError && <p className="auth-error" role="alert">{pinError}</p>}
     {pinMessage && <p className="account-success" role="status">{pinMessage}</p>}
     <form className="pin-form" onSubmit={saveTransactionPin}>
-      {pinConfigured && <><label htmlFor="pin-current">Current transaction PIN</label><input id="pin-current" inputMode="numeric" autoComplete="off" type="password" pattern="[0-9]{4}" maxLength={4} required value={pinCurrent} onChange={event => setPinCurrent(event.target.value.replace(/\\D/g, '').slice(0, 4))} /></>}
+      {pinConfigured && <><label htmlFor="pin-current">Current transaction PIN</label><input id="pin-current" inputMode="numeric" autoComplete="off" type="password" pattern="[0-9]{4}" maxLength={4} required value={pinCurrent} onChange={event => setPinCurrent(event.target.value.replace(/\D/g, '').slice(0, 4))} /></>}
       <label htmlFor="pin-new">{pinConfigured ? 'New transaction PIN' : 'Create transaction PIN'}</label>
-      <input id="pin-new" inputMode="numeric" autoComplete="new-password" type="password" pattern="[0-9]{4}" maxLength={4} required value={pinValue} onChange={event => setPinValue(event.target.value.replace(/\\D/g, '').slice(0, 4))} />
+      <input id="pin-new" inputMode="numeric" autoComplete="new-password" type="password" pattern="[0-9]{4}" maxLength={4} required value={pinValue} onChange={event => setPinValue(event.target.value.replace(/\D/g, '').slice(0, 4))} />
       <label htmlFor="pin-password">Confirm your account password</label>
       <input id="pin-password" autoComplete="current-password" type="password" required value={pinPassword} onChange={event => setPinPassword(event.target.value)} />
       <button className="button button-primary" type="submit" disabled={pinSaving}>{pinSaving ? 'Saving securely…' : pinConfigured ? 'Change transaction PIN' : 'Set transaction PIN'}</button>
