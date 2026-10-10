@@ -52,8 +52,14 @@ class EnsureTransactionPin
             $table = str_ends_with($path, '/payments/deposits') ? 'deposit_intents'
                 : (str_ends_with($path, '/payments/payouts') ? 'payout_requests' : null);
             if ($table && is_numeric($recordId) && $business) {
+                $existing = DB::table($table)->where('business_id', $business->id)
+                    ->where('id', (int) $recordId)->where('user_id', $user->id)->first();
+                if ($existing && filled($existing->purpose) && $existing->purpose !== trim($data['purpose'])) {
+                    return response()->json(['message' => 'This idempotency reference was already used with a different transaction purpose.'], 409);
+                }
                 DB::table($table)->where('business_id', $business->id)->where('id', (int) $recordId)
-                    ->where('user_id', $user->id)->update(['purpose' => trim($data['purpose']), 'updated_at' => now()]);
+                    ->where('user_id', $user->id)->whereNull('purpose')
+                    ->update(['purpose' => trim($data['purpose']), 'updated_at' => now()]);
                 DB::table('payment_operation_events')->insert([
                     'business_id' => $business->id,
                     'operation_type' => $table === 'deposit_intents' ? 'deposit' : 'payout',
