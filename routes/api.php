@@ -15,6 +15,9 @@ use App\Http\Controllers\Api\V1\PaymentWorkflowController;
 use App\Http\Controllers\Api\V1\BankAccountVerificationController;
 use App\Http\Controllers\Api\V1\UserDepositAccountController;
 use App\Http\Controllers\Api\V1\PaystackWebhookController;
+use App\Http\Controllers\Api\V1\DepositAccountOperationsController;
+use App\Http\Controllers\Api\V1\TransactionPinController;
+use App\Http\Middleware\EnsureTransactionPin;
 use App\Http\Controllers\Api\V1\PlatformAdminController;
 use App\Http\Middleware\AuthenticateApiToken;
 use App\Http\Middleware\EnsureVerifiedEmail;
@@ -64,6 +67,8 @@ Route::prefix('v1')->group(function (): void {
 
         Route::middleware(AuthenticateApiToken::class)->group(function (): void {
             Route::get('/me', [AuthController::class, 'me']);
+            Route::get('/transaction-pin', [TransactionPinController::class, 'show']);
+            Route::post('/transaction-pin', [TransactionPinController::class, 'store'])->middleware('throttle:5,1');
             Route::post('/logout', [AuthController::class, 'logout']);
             Route::post('/email/verification-notification', [AuthController::class, 'resendVerification'])->middleware('throttle:3,1');
         });
@@ -77,6 +82,10 @@ Route::prefix('v1')->group(function (): void {
         Route::middleware(RequireBusinessMembership::class)->prefix('business')->group(function (): void {
             Route::get('/current', [BusinessController::class, 'current']);
             Route::get('/payments/deposit-accounts', [UserDepositAccountController::class, 'index']);
+            Route::get('/payments/deposit-accounts/operations', [DepositAccountOperationsController::class, 'index'])
+                ->middleware(RequireBusinessPermission::class.':reconciliation.manage');
+            Route::post('/payments/deposit-accounts/{accountId}/escalate', [DepositAccountOperationsController::class, 'escalate'])
+                ->whereNumber('accountId')->middleware([RequireBusinessPermission::class.':reconciliation.manage', 'throttle:10,1']);
             Route::get('/payments/provider-deposits', [PaystackWebhookController::class, 'depositsForReview'])
                 ->middleware(RequireBusinessPermission::class.':reconciliation.manage');
             Route::post('/payments/provider-deposits/{eventId}/review', [PaystackWebhookController::class, 'reviewDepositEvent'])
@@ -97,12 +106,12 @@ Route::prefix('v1')->group(function (): void {
                 ->middleware([RequireBusinessPermission::class.':payments.manage', 'throttle:5,1']);
             Route::get('/payments/deposits', [PaymentWorkflowController::class, 'deposits']);
             Route::post('/payments/deposits', [PaymentWorkflowController::class, 'createDeposit'])
-                ->middleware('throttle:10,1');
+                ->middleware(['throttle:10,1', EnsureTransactionPin::class]);
             Route::post('/payments/deposits/{depositId}/review', [PaymentWorkflowController::class, 'reviewDeposit'])
                 ->whereNumber('depositId')->middleware(RequireBusinessPermission::class.':payments.manage');
             Route::get('/payments/payouts', [PaymentWorkflowController::class, 'payouts']);
             Route::post('/payments/payouts', [PaymentWorkflowController::class, 'createPayout'])
-                ->middleware('throttle:5,1');
+                ->middleware(['throttle:5,1', EnsureTransactionPin::class]);
             Route::post('/payments/payouts/{payoutId}/decision', [PaymentWorkflowController::class, 'decidePayout'])
                 ->whereNumber('payoutId')->middleware(RequireBusinessPermission::class.':payments.manage');
             Route::post('/payments/payouts/{payoutId}/manual-payment-evidence', [PaymentWorkflowController::class, 'confirmManualPayout'])
