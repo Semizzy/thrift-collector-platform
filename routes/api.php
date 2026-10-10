@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\V1\ContributionScheduleController;
 use App\Http\Controllers\Api\V1\ContributionAdjustmentController;
 use App\Http\Controllers\Api\V1\ReconciliationController;
 use App\Http\Controllers\Api\V1\PaymentWorkflowController;
+use App\Http\Controllers\Api\V1\BankAccountVerificationController;
 use App\Http\Controllers\Api\V1\PlatformAdminController;
 use App\Http\Middleware\AuthenticateApiToken;
 use App\Http\Middleware\EnsureVerifiedEmail;
@@ -72,6 +73,10 @@ Route::prefix('v1')->group(function (): void {
 
         Route::middleware(RequireBusinessMembership::class)->prefix('business')->group(function (): void {
             Route::get('/current', [BusinessController::class, 'current']);
+            Route::get('/payments/banks', [BankAccountVerificationController::class, 'banks'])
+                ->middleware('throttle:30,1');
+            Route::post('/payments/accounts/resolve', [BankAccountVerificationController::class, 'resolve'])
+                ->middleware('throttle:10,1');
             Route::get('/payments/gateways', [PaymentWorkflowController::class, 'gateways'])
                 ->middleware(RequireBusinessPermission::class.':payments.manage');
             Route::put('/payments/gateways/{provider}/{direction}', [PaymentWorkflowController::class, 'configureGateway'])
