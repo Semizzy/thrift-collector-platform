@@ -123,7 +123,6 @@ type DashboardSummary = { user: DashboardProfile; active_workspaces_count: numbe
 function UserDashboard({ active }: { active: string }) {
   const [token, setToken] = useState(() => sessionStorage.getItem('tcp_access_token') ?? '');
   const [profile, setProfile] = useState<DashboardProfile | null>(null);
-  const [workspaceCount, setWorkspaceCount] = useState<number | null>(null);
   const [dashboardData, setDashboardData] = useState<DashboardSummary | null>(null);
   const [authLoading, setAuthLoading] = useState(Boolean(token));
   const [authError, setAuthError] = useState('');
@@ -131,7 +130,7 @@ function UserDashboard({ active }: { active: string }) {
   const [password, setPassword] = useState('');
 
   useEffect(() => {
-    if (!token) { setAuthLoading(false); setProfile(null); setWorkspaceCount(null); setDashboardData(null); return; }
+    if (!token) { setAuthLoading(false); setProfile(null); setDashboardData(null); return; }
     let cancelled = false;
     setAuthLoading(true);
     fetch('/api/v1/dashboard/summary', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } })
@@ -140,7 +139,7 @@ function UserDashboard({ active }: { active: string }) {
         return response.json() as Promise<{ data: DashboardSummary }>;
       })
       .then(result => {
-        if (!cancelled) { setProfile(result.data.user); setWorkspaceCount(result.data.active_workspaces_count); setDashboardData(result.data); setAuthError(''); }
+        if (!cancelled) { setProfile(result.data.user); setDashboardData(result.data); setAuthError(''); }
       })
       .catch(error => {
         if (!cancelled) { sessionStorage.removeItem('tcp_access_token'); setToken(''); setAuthError(error instanceof Error ? error.message : 'Please sign in to continue.'); }
@@ -203,7 +202,7 @@ function UserDashboard({ active }: { active: string }) {
     <SectionHeading eyebrow="MEMBER WORKSPACE" title={profile ? `Welcome back, ${profile.name.split(' ')[0]}.` : 'Your savings, at a glance.'} description={profile ? `Signed in as ${profile.email}. Your dashboard uses authenticated account data.` : 'Welcome to your personal thrift workspace. Your confirmed activity will appear here.'} />
     <div className="notice"><div className="notice-symbol"><Activity size={18} /></div><div className="notice-copy"><strong>Account data connected securely</strong><p>Your profile and active workspace count are loaded from the authenticated API. Financial totals remain hidden until verified contribution records exist.</p></div><button className="text-button signout-button" onClick={signOut}><LogOut size={15} /> Sign out</button></div>
     <section className="stats-grid" aria-label="Account summary">
-      <article className="stat-card stat-featured"><div className="stat-top"><span>Total contributions recorded</span><span className="stat-icon"><Wallet size={19} /></span></div><div className="stat-value">{dashboardData?.confirmed_contribution_totals.length ? dashboardData.confirmed_contribution_totals.map(total => `${total.currency_code} ${new Intl.NumberFormat('en-NG', { maximumFractionDigits: 2 }).format(total.total_minor / 100)}`).join(' · ') : '—'}</div><div className="stat-foot"><span className="status-pill status-neutral"><Activity size={13} /> Confirmed records only</span></div></article>
+      <article className="stat-card stat-featured"><div className="stat-top"><span>Total confirmed contributions</span><span className="stat-icon"><Wallet size={19} /></span></div><div className="stat-value">{dashboardData?.confirmed_contribution_totals.length ? dashboardData.confirmed_contribution_totals.map(total => `${total.currency_code} ${new Intl.NumberFormat('en-NG', { maximumFractionDigits: 2 }).format(total.total_minor / 100)}`).join(' · ') : '—'}</div><div className="stat-foot"><span className="status-pill status-neutral"><Activity size={13} /> Confirmed records only</span></div></article>
       <article className="stat-card"><div className="stat-top"><span>Active thrift groups</span><span className="stat-icon green"><Users size={19} /></span></div><div className="stat-value">{dashboardData?.active_groups_count ?? "—"}</div><div className="stat-foot muted">Groups where you have active membership</div></article>
       <article className="stat-card"><div className="stat-top"><span>Upcoming contributions</span><span className="stat-icon amber"><CalendarClock size={19} /></span></div><div className="stat-value">—</div><div className="stat-foot muted">Due dates from your group cycles</div></article>
       <article className="stat-card"><div className="stat-top"><span>Confirmed records</span><span className="stat-icon green"><CheckCircle2 size={19} /></span></div><div className="stat-value">{dashboardData?.confirmed_contribution_totals.reduce((sum, total) => sum + total.records_count, 0) ?? '—'}</div><div className="stat-foot muted">Confirmed records; not settlement proof</div></article>
