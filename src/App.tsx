@@ -123,6 +123,15 @@ function EmptyPanel({ icon: Icon, title, body }: { icon: LucideIcon; title: stri
   return <div className="empty-panel"><div className="empty-icon"><Icon size={23} /></div><strong>{title}</strong><p>{body}</p></div>;
 }
 
+function PaymentHistoryRow({ item }: { item: PaymentRequest }) {
+  const status = item.status.replaceAll('_', ' ');
+  const reviewNote = item.review_reason || item.decision_reason;
+  return <article className="payment-history-row">
+    <div className="payment-history-main"><strong>{item.purpose || 'Payment request'}</strong><small>#{item.id} · {item.client_reference} · {new Date(item.created_at).toLocaleString()}</small>{reviewNote && <small>Review note: {reviewNote}</small>}</div>
+    <div className="payment-history-side"><strong>{new Intl.NumberFormat('en-NG', { style: 'currency', currency: item.currency_code }).format(item.amount_minor / 100)}</strong><span className={'status-pill ' + (['rejected', 'failed'].includes(item.status) ? 'status-warning' : 'status-neutral')}>{status}</span></div>
+  </article>;
+}
+
 type DashboardProfile = { id: number; name: string; email: string; email_verified_at: string | null };
 type DepositAccount = { id: number; provider: string; bank_code: string; bank_name: string; account_number: string | null; account_name: string | null; currency_code: string; status: string; assigned_at: string | null };
 type DepositBank = { code: string; name: string; provider: string; currency_code: string };
@@ -530,6 +539,40 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
     <p className="deposit-consent-note">A review records evidence status only. It does not verify final settlement or credit a member balance. The account holder cannot review their own event.</p>
   </section>;
 
+  const paymentRequestsPanel = <div className="payment-workflow">
+    <section className="panel">
+      <div className="panel-heading"><div><h2>Request a deposit</h2><p>Record a manual deposit for independent review. Submitting a request does not add funds to your balance.</p></div><ArrowDownLeft size={22} /></div>
+      <form className="pin-form" onSubmit={submitDepositRequest}>
+        <label htmlFor="deposit-amount">Amount ({dashboardData?.workspaces.find(workspace => String(workspace.id) === selectedBusinessId)?.country_code === 'GH' ? 'GHS' : 'NGN'})</label><input id="deposit-amount" type="number" min="1" step="0.01" required value={depositAmount} onChange={event => setDepositAmount(event.target.value)} />
+        <label htmlFor="deposit-purpose">Purpose of deposit</label><input id="deposit-purpose" minLength={3} maxLength={255} required value={depositPurpose} onChange={event => setDepositPurpose(event.target.value)} placeholder="e.g. October thrift contribution" />
+        <label htmlFor="deposit-reference">Request reference (optional)</label><input id="deposit-reference" maxLength={100} value={depositReference} onChange={event => setDepositReference(event.target.value)} placeholder="Auto-generated if blank" />
+        <label htmlFor="deposit-transaction-pin">Transaction PIN</label><input id="deposit-transaction-pin" type="password" inputMode="numeric" pattern="[0-9]{4}" maxLength={4} autoComplete="off" required value={depositPin} onChange={event => setDepositPin(event.target.value.replace(/\D/g, '').slice(0, 4))} />
+        <button className="button button-primary" type="submit" disabled={paymentSubmitting || !selectedBusinessId}>{paymentSubmitting ? 'Submitting…' : 'Submit deposit request'}</button>
+      </form>
+    </section>
+    <section className="panel">
+      <div className="panel-heading"><div><h2>Request a payout</h2><p>Verify a bank account and submit a payout request for independent approval. No transfer is executed.</p></div><ArrowRight size={22} /></div>
+      <form className="pin-form" onSubmit={submitPayoutRequest}>
+        <label htmlFor="payout-amount">Amount ({dashboardData?.workspaces.find(workspace => String(workspace.id) === selectedBusinessId)?.country_code === 'GH' ? 'GHS' : 'NGN'})</label><input id="payout-amount" type="number" min="1" step="0.01" required value={payoutAmount} onChange={event => setPayoutAmount(event.target.value)} />
+        <label htmlFor="payout-purpose">Purpose of payout</label><input id="payout-purpose" minLength={3} maxLength={255} required value={payoutPurpose} onChange={event => setPayoutPurpose(event.target.value)} placeholder="e.g. approved savings withdrawal" />
+        <label htmlFor="payout-bank">Destination bank</label><select id="payout-bank" required value={payoutBankCode} onChange={event => setPayoutBankCode(event.target.value)}>{paymentBanks.map(bank => <option key={bank.code} value={bank.code}>{bank.name}</option>)}</select>
+        <label htmlFor="payout-account-number">Destination account number</label><input id="payout-account-number" inputMode="numeric" pattern="[0-9]{10}" maxLength={10} required value={payoutAccountNumber} onChange={event => setPayoutAccountNumber(event.target.value.replace(/\D/g, '').slice(0, 10))} />
+        <label htmlFor="payout-reference">Request reference (optional)</label><input id="payout-reference" maxLength={100} value={payoutReference} onChange={event => setPayoutReference(event.target.value)} placeholder="Auto-generated if blank" />
+        <label htmlFor="payout-transaction-pin">Transaction PIN</label><input id="payout-transaction-pin" type="password" inputMode="numeric" pattern="[0-9]{4}" maxLength={4} autoComplete="off" required value={payoutPin} onChange={event => setPayoutPin(event.target.value.replace(/\D/g, '').slice(0, 4))} />
+        <button className="button button-primary" type="submit" disabled={paymentSubmitting || !selectedBusinessId || !paymentBanks.length}>{paymentSubmitting ? 'Verifying and submitting…' : 'Verify bank & request payout'}</button>
+      </form>
+    </section>
+    {paymentError && <p className="auth-error" role="alert">{paymentError}</p>}
+    {paymentMessage && <p className="account-success" role="status">{paymentMessage}</p>}
+    <section className="panel"><div className="panel-heading"><div><h2>Deposit request history</h2><p>Evidence review is separate from balance crediting.</p></div><button className="text-button" onClick={() => setActive('Deposit & payout')}>Refresh <RefreshCw size={14} /></button></div>
+      {paymentLoading ? <p className="muted">Loading request history…</p> : depositRequests.length ? <div className="payment-history">{depositRequests.map(item => <PaymentHistoryRow key={'deposit-'+item.id} item={item} />)}</div> : <EmptyPanel icon={ArrowDownLeft} title="No deposit requests" body="Your submitted deposit requests will appear here." />}
+    </section>
+    <section className="panel"><div className="panel-heading"><div><h2>Payout request history</h2><p>Approval status is not proof that a transfer was made.</p></div></div>
+      {paymentLoading ? <p className="muted">Loading request history…</p> : payoutRequests.length ? <div className="payment-history">{payoutRequests.map(item => <PaymentHistoryRow key={'payout-'+item.id} item={item} />)}</div> : <EmptyPanel icon={ArrowRight} title="No payout requests" body="Your submitted payout requests will appear here." />}
+    </section>
+    <p className="deposit-consent-note">Live provider payments and payouts remain disabled. These forms create reviewable requests only; no wallet credit, ledger posting, or bank transfer occurs.</p>
+  </div>;
+
   const transactionPinPanel = <section className="panel transaction-pin-panel">
     <div className="panel-heading"><div><h2>Transaction PIN</h2><p>Protect payment requests with a four-digit PIN. The PIN is stored as a password hash and is never displayed again.</p></div><ShieldCheck size={22} /></div>
     <div className="pin-status-row"><span className={'status-pill ' + (pinConfigured ? 'status-neutral' : 'status-warning')}>{pinConfigured ? 'PIN configured' : 'PIN setup required'}</span>{pinSetAt && <span className="muted">Last set {new Date(pinSetAt).toLocaleDateString()}</span>}</div>
@@ -604,6 +647,8 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   if (active === 'Deposit review') return <><SectionHeading eyebrow="BUSINESS WORKSPACE · AUTHORIZED REVIEWERS" title="Deposit review" description="Independently review provider notifications and record an auditable evidence decision." />{providerDepositReviewPanel}</>;
 
   if (active === 'Account operations') return <><SectionHeading eyebrow="BUSINESS WORKSPACE · AUTHORIZED OPERATIONS" title="Pending account operations" description="Diagnose repeated or long-running provider assignments and escalate them for support follow-up." />{accountOperationsPanel}</>;
+
+  if (active === 'Deposit & payout') return <><SectionHeading eyebrow="MEMBER WORKSPACE · PAYMENT REQUESTS" title="Deposits & payouts" description="Submit requests with a purpose and transaction PIN, then follow their review status." />{paymentRequestsPanel}</>;
 
   if (active === 'Security & PIN') return <><SectionHeading eyebrow="ACCOUNT SECURITY" title="Security & transaction PIN" description="Set or update the PIN used to confirm payment requests." />{transactionPinPanel}</>;
 
