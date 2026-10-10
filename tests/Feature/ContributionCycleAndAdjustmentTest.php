@@ -73,13 +73,13 @@ final class ContributionCycleAndAdjustmentTest extends TestCase
         $this->withToken($token)->withHeader('X-Business-Id', (string) $business->id)
             ->postJson('/api/v1/business/groups/'.$group->id.'/schedules', [
                 'name' => 'Monthly Contribution', 'amount_minor' => 500000,
-                'frequency' => 'monthly', 'starts_on' => '2026-01-01',
+                'frequency' => 'monthly', 'starts_on' => '2027-01-01',
                 'due_day_of_month' => 15,
             ])->assertCreated()->assertJsonPath('data.currency_code', 'NGN');
 
         $schedule = ContributionSchedule::query()->firstOrFail();
         $path = '/api/v1/business/groups/'.$group->id.'/schedules/'.$schedule->id.'/generate-cycles';
-        $payload = ['from' => '2026-01-01', 'through' => '2026-03-31'];
+        $payload = ['from' => '2027-01-01', 'through' => '2027-03-31'];
         $this->withToken($token)->withHeader('X-Business-Id', (string) $business->id)
             ->postJson($path, $payload)->assertOk()
             ->assertJsonPath('data.created_count', 3)
@@ -94,6 +94,9 @@ final class ContributionCycleAndAdjustmentTest extends TestCase
 
         $this->assertSame(3, ContributionCycle::query()->count());
         $this->assertSame(6, ContributionCycleObligation::query()->count());
+        $this->withToken($token)->getJson('/api/v1/dashboard/summary')->assertOk()
+            ->assertJsonPath('data.upcoming_obligations_count', 3)
+            ->assertJsonPath('data.upcoming_obligations.0.expected_amount_minor', 500000);
         $this->assertSame(0, ContributionRecord::query()->count());
         $this->assertDatabaseHas('business_audit_events', ['action' => 'contribution_cycles.generated', 'actor_user_id' => $owner->id]);
     }
