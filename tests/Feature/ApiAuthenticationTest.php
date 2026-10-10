@@ -11,6 +11,7 @@ use App\Notifications\ApiPasswordResetNotification;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\URL;
@@ -103,6 +104,46 @@ final class ApiAuthenticationTest extends TestCase
 
         self::assertTrue(Hash::check('another-strong-password', $user->fresh()->password));
         $this->assertDatabaseMissing('personal_access_tokens', ['user_id' => $user->id]);
+    }
+
+    public function test_three_failed_logins_lock_account_until_password_reset_and_admin_configured_timeout(): void
+    {
+        $user = User::query()->create([
+            'name' => 'Lockout User',
+            'email' => 'lockout@example.test',
+            'password' => 'a-strong-test-password',
+        ]);
+        DB::table('platform_settings')->updateOrInsert(
+            ['key' => 'login_lockout_hours'],
+            ['value' => '4', 'updated_at' => now()]
+        );
+
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
+            $this->postJson('/api/v1/auth/login', ['email' => $user->email, 'password' => 'incorrect-password'])
+                ->assertUnprocessable();
+        }
+        $this->postJson('/api/v1/auth/login', ['email' => $user->email, 'password' => 'incorrect-password'])
+            ->assertStatus(423);
+        $user->refresh();
+        self::assertSame(3, (int) $user->failed_login_attempts);
+        self::assertTrue($user->login_locked_until->between(now()->addHours(3)->subMinute(), now()->addHours(4)->addMinute()));
+
+        $this->postJson('/api/v1/auth/login', ['email' => $user->email, 'password' => 'a-strong-test-password'])
+            ->assertStatus(423);
+
+        $resetToken = Password::createToken($user);
+        $this->postJson('/api/v1/auth/password/reset', [
+            'email' => $user->email,
+            'token' => $resetToken,
+            'password' => 'a-new-strong-password',
+            'password_confirmation' => 'a-new-strong-password',
+        ])->assertOk();
+
+        $user->refresh();
+        self::assertSame(0, (int) $user->failed_login_attempts);
+        self::assertNull($user->login_locked_until);
+        $this->postJson('/api/v1/auth/login', ['email' => $user->email, 'password' => 'a-new-strong-password'])
+            ->assertOk()->assertJsonPath('token_type', 'Bearer');
     }
 
     public function test_reset_password_page_renders(): void
