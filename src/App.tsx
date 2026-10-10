@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   Activity, ArrowDownLeft, ArrowRight, Bell, CalendarClock, CheckCircle2,
   ChevronDown, CircleHelp, ClipboardCheck, CreditCard, FileText, Home,
-  LayoutDashboard, LogOut, Menu, Moon, Search, Settings, ShieldCheck,
+  LayoutDashboard, Menu, Moon, Search, Settings, ShieldCheck,
   Sun, Users, Wallet, X, type LucideIcon,
 } from 'lucide-react';
 
