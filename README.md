@@ -73,3 +73,16 @@ Confirm the host's PHP CLI version, extensions, database version, document-root 
 - [Roadmap](docs/roadmap.md)
 
 Do not enable a payment provider or capability until official documentation, sandbox behavior, webhook verification, transaction-status verification, settlement semantics, currencies, limits, and country/legal readiness have been checked and tested. Real payment execution and custody remain disabled until the security, reconciliation, and legal release gates pass.
+
+
+## Dedicated deposit accounts and Paystack webhooks
+
+Members can hold multiple provider-assigned deposit accounts per business workspace. The member dashboard's **Bank accounts** section loads the authenticated member's accounts and provider-supported bank choices, and offers an **Add another bank account** request. Every request uses a unique client reference and explicit consent. Account numbers and account names are encrypted at rest.
+
+Dedicated account provisioning stays unavailable unless a business administrator has configured Paystack credentials and explicitly sets `public_config.virtual_accounts_enabled=true`. Provider availability, customer eligibility and supported banks remain subject to Paystack approval; this is not a promise of all-bank coverage.
+
+Configure Paystack to send signed webhooks to `POST /api/v1/webhooks/paystack`. The endpoint verifies the `x-paystack-signature` HMAC against configured Paystack secret keys before processing events. It handles `dedicated_account.assign.success` and assignment failure events to reconcile pending account assignments. `charge.success` events are recorded as provider-deposit evidence, with idempotent provider event/transaction records and an account match where possible.
+
+Business members with the `reconciliation.manage` permission can inspect provider deposits through `GET /api/v1/business/payments/provider-deposits` and record an independent evidence decision through `POST /api/v1/business/payments/provider-deposits/{eventId}/review`. Decisions are immutable after first review; corrections need a separately audited correction process.
+
+**Important financial release boundary:** signed webhook receipt and a successful reconciliation evidence decision do not prove provider settlement and do not credit a wallet, contribution, or ledger. Automated settlement verification, independently reviewed ledger posting/reversal workflows, sandbox certification, and production release approval remain separate gates. Do not enable live money movement based only on this webhook increment.
