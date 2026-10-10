@@ -1,0 +1,164 @@
+<?php
+
+namespace App\Services;
+
+use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
+
+class WalletLedgerService
+{
+    public function balance(int $businessId, int $userId, string $currency): int
+    {
+        $key = $this->walletKey($userId, $currency);
+        return (int) (DB::table('wallet_accounts')->where('business_id', $businessId)
+            ->where('account_key', $key)->value('balance_minor') ?? 0);
+    }
+
+    public function entries(int $businessId, int $userId, string $currency, int $limit = 50): array
+    {
+        $key = $this->walletKey($userId, $currency);
+        $account = DB::table('wallet_accounts')->where('business_id', $businessId)
+            ->where('account_key', $key)->first();
+        if (! $account) return [];
+
+        return DB::table('wallet_ledger_entries as e')
+            ->join('wallet_ledger_transactions as t', 't.id', '=', 'e.wallet_ledger_transaction_id')
+            ->where('t.business_id', $businessId)->where('e.wallet_account_id', $account->id)
+            ->orderByDesc('e.id')->limit(max(1, min(100, $limit)))
+            ->get(['e.id', 'e.direction', 'e.amount_minor', 'e.balance_after_minor', 'e.created_at',
+                't.source_type', 't.source_id', 't.description', 't.idempotency_key'])
+            ->map(fn ($row) => (array) $row)->all();
+    }
+
+    public function creditContribution(int $businessId, int $userId, string $currency, int $amount, int $contributionId, ?int $actorId): array
+    {
+        return $this->post($businessId, $currency, 'contribution_record', $contributionId,
+            'contribution:'.$contributionId.':wallet-credit', 'Confirmed savings contribution credited to member wallet.',
+            [
+                ['key' => $this->systemKey('contribution-clearing', $currency), 'type' => 'contribution_clearing', 'user_id' => null, 'normal' => 'debit', 'direction' => 'debit', 'amount' => $amount],
+                ['key' => $this->walletKey($userId, $currency), 'type' => 'member_wallet', 'user_id' => $userId, 'normal' => 'credit', 'direction' => 'credit', 'amount' => $amount],
+            ], $actorId);
+    }
+
+    public function debitWithdrawal(int $businessId, int $userId, string $currency, int $amount, int $payoutId, ?int $actorId): array
+    {
+        return $this->post($businessId, $currency, 'payout_request', $payoutId,
+            'payout:'.$payoutId.':wallet-debit', 'Wallet funds reserved for withdrawal request.',
+            [
+                ['key' => $this->walletKey($userId, $currency), 'type' => 'member_wallet', 'user_id' => $userId, 'normal' => 'credit', 'direction' => 'debit', 'amount' => $amount],
+                ['key' => $this->systemKey('payout-payable', $currency), 'type' => 'payout_payable', 'user_id' => null, 'normal' => 'credit', 'direction' => 'credit', 'amount' => $amount],
+            ], $actorId, $this->walletKey($userId, $currency));
+    }
+
+    public function refundWithdrawal(int $businessId, int $userId, string $currency, int $amount, int $payoutId, ?int $actorId, string $reason): array
+    {
+        return $this->post($businessId, $currency, 'payout_request', $payoutId,
+            'payout:'.$payoutId.':wallet-refund', 'Withdrawal wallet refund: '.$reason,
+            [
+                ['key' => $this->systemKey('payout-payable', $currency), 'type' => 'payout_payable', 'user_id' => null, 'normal' => 'credit', 'direction' => 'debit', 'amount' => $amount],
+                ['key' => $this->walletKey($userId, $currency), 'type' => 'member_wallet', 'user_id' => $userId, 'normal' => 'credit', 'direction' => 'credit', 'amount' => $amount],
+            ], $actorId);
+    }
+
+    public function settleWithdrawal(int $businessId, string $currency, int $amount, int $payoutId, ?int $actorId, string $reference): array
+    {
+        return $this->post($businessId, $currency, 'payout_request', $payoutId,
+            'payout:'.$payoutId.':settlement', 'Withdrawal settled against independently reviewed bank evidence.',
+            [
+                ['key' => $this->systemKey('payout-payable', $currency), 'type' => 'payout_payable', 'user_id' => null, 'normal' => 'credit', 'direction' => 'debit', 'amount' => $amount],
+                ['key' => $this->systemKey('bank-clearing', $currency), 'type' => 'bank_clearing', 'user_id' => null, 'normal' => 'debit', 'direction' => 'credit', 'amount' => $amount],
+            ], $actorId, null, ['transfer_reference' => $reference]);
+    }
+
+    private function post(
+        int $businessId,
+        string $currency,
+        string $sourceType,
+        int $sourceId,
+        string $idempotencyKey,
+        string $description,
+        array $lines,
+        ?int $actorId,
+        ?string $requiredWalletBalanceKey = null,
+        array $metadata = [],
+    ): array {
+        if ($currency !== strtoupper($currency) || strlen($currency) !== 3 || $amounts = array_filter($lines, fn ($line) => $line['amount'] < 1)) {
+            throw new InvalidArgumentException('Ledger entries require a valid currency and positive amounts.');
+        }
+        $debits = array_sum(array_map(fn ($line) => $line['direction'] === 'debit' ? $line['amount'] : 0, $lines));
+        $credits = array_sum(array_map(fn ($line) => $line['direction'] === 'credit' ? $line['amount'] : 0, $lines));
+        if ($debits !== $credits || count($lines) < 2) {
+            throw new InvalidArgumentException('Every wallet journal must contain equal debits and credits.');
+        }
+
+        return DB::transaction(function () use ($businessId, $currency, $sourceType, $sourceId, $idempotencyKey, $description, $lines, $actorId, $requiredWalletBalanceKey, $metadata): array {
+            $keys = array_values(array_unique(array_column($lines, 'key')));
+            sort($keys, SORT_STRING);
+            foreach ($keys as $key) {
+                $line = collect($lines)->firstWhere('key', $key);
+                DB::table('wallet_accounts')->insertOrIgnore([
+                    'business_id' => $businessId, 'user_id' => $line['user_id'],
+                    'account_key' => $key, 'account_type' => $line['type'],
+                    'normal_balance' => $line['normal'], 'currency_code' => $currency,
+                    'balance_minor' => 0, 'created_at' => now(), 'updated_at' => now(),
+                ]);
+            }
+            $accounts = [];
+            foreach ($keys as $key) {
+                $accounts[$key] = DB::table('wallet_accounts')->where('business_id', $businessId)
+                    ->where('account_key', $key)->lockForUpdate()->first();
+            }
+
+            $existing = DB::table('wallet_ledger_transactions')->where('business_id', $businessId)
+                ->where('idempotency_key', $idempotencyKey)->first();
+            if ($existing) return ['status' => 'already_posted', 'transaction_id' => $existing->id];
+
+            if ($requiredWalletBalanceKey !== null
+                && (int) $accounts[$requiredWalletBalanceKey]->balance_minor < array_sum(array_map(
+                    fn ($line) => $line['key'] === $requiredWalletBalanceKey && $line['direction'] === 'debit' ? $line['amount'] : 0,
+                    $lines
+                ))) {
+                return ['status' => 'insufficient_balance', 'transaction_id' => null];
+            }
+
+            $transactionId = DB::table('wallet_ledger_transactions')->insertGetId([
+                'business_id' => $businessId, 'currency_code' => $currency,
+                'source_type' => $sourceType, 'source_id' => $sourceId,
+                'idempotency_key' => $idempotencyKey, 'description' => $description,
+                'metadata' => json_encode($metadata, JSON_THROW_ON_ERROR),
+                'created_by_user_id' => $actorId, 'created_at' => now(),
+            ]);
+
+            foreach ($lines as $line) {
+                $account = $accounts[$line['key']];
+                $normalIncrease = $line['direction'] === $line['normal'];
+                $delta = $normalIncrease ? $line['amount'] : -$line['amount'];
+                $newBalance = (int) $account->balance_minor + $delta;
+                if ($line['type'] === 'member_wallet' && $newBalance < 0) {
+                    throw new InvalidArgumentException('A member wallet cannot have a negative balance.');
+                }
+                DB::table('wallet_accounts')->where('id', $account->id)->update([
+                    'balance_minor' => $newBalance, 'updated_at' => now(),
+                ]);
+                DB::table('wallet_ledger_entries')->insert([
+                    'wallet_ledger_transaction_id' => $transactionId, 'wallet_account_id' => $account->id,
+                    'direction' => $line['direction'], 'amount_minor' => $line['amount'],
+                    'balance_after_minor' => $newBalance, 'created_at' => now(),
+                ]);
+                $accounts[$line['key']]->balance_minor = $newBalance;
+            }
+
+            return ['status' => 'posted', 'transaction_id' => $transactionId];
+        }, 3);
+    }
+
+    private function walletKey(int $userId, string $currency): string
+    {
+        return 'wallet:'.$userId.':'.$currency;
+    }
+
+    private function systemKey(string $type, string $currency): string
+    {
+        return $type.':'.$currency;
+    }
+}
