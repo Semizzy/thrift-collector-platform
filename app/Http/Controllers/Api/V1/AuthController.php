@@ -5,9 +5,13 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\PersonalAccessToken;
 use App\Models\User;
+use Illuminate\Auth\Events\Verified;
+use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -26,6 +30,7 @@ class AuthController extends Controller
             'email' => Str::lower(trim($data['email'])),
             'password' => $data['password'],
         ]);
+        $user->sendEmailVerificationNotification();
 
         return $this->issueToken($user, 'registration', 201);
     }
@@ -47,7 +52,63 @@ class AuthController extends Controller
 
     public function me(Request $request): JsonResponse
     {
-        return response()->json(['data' => $request->user()->only(['id', 'name', 'email', 'created_at'])]);
+        return response()->json(['data' => $request->user()->only(['id', 'name', 'email', 'email_verified_at', 'created_at'])]);
+    }
+
+    public function verifyEmail(Request $request, string $id, string $hash): JsonResponse
+    {
+        $user = User::query()->findOrFail($id);
+        if (! hash_equals(sha1($user->getEmailForVerification()), $hash)) {
+            return response()->json(['message' => 'Invalid verification link.'], 403);
+        }
+
+        if (! $user->hasVerifiedEmail() && $user->markEmailAsVerified()) {
+            event(new Verified($user));
+        }
+
+        return response()->json(['message' => 'Email address verified.']);
+    }
+
+    public function resendVerification(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (! $user->hasVerifiedEmail()) {
+            $user->sendEmailVerificationNotification();
+        }
+
+        return response()->json(['message' => 'If verification is still required, a new link has been sent.']);
+    }
+
+    public function forgotPassword(Request $request): JsonResponse
+    {
+        $data = $request->validate(['email' => ['required', 'email:rfc', 'max:254']]);
+        Password::sendResetLink(['email' => Str::lower(trim($data['email']))]);
+
+        return response()->json(['message' => 'If an account matches that email, password reset instructions will be sent.']);
+    }
+
+    public function resetPassword(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'email' => ['required', 'email:rfc', 'max:254'],
+            'token' => ['required', 'string'],
+            'password' => ['required', 'string', 'min:12', 'max:200', 'confirmed'],
+        ]);
+
+        $status = Password::reset(
+            ['email' => Str::lower(trim($data['email'])), 'token' => $data['token'], 'password' => $data['password'], 'password_confirmation' => $data['password_confirmation']],
+            function (User $user, string $password): void {
+                $user->forceFill(['password' => $password])->save();
+                $user->tokens()->delete();
+                event(new PasswordReset($user));
+            }
+        );
+
+        if ($status !== Password::PASSWORD_RESET) {
+            return response()->json(['message' => 'The reset token is invalid or expired. Request a new password reset link.'], 422);
+        }
+
+        return response()->json(['message' => 'Password reset successfully. Please sign in again.']);
     }
 
     public function logout(Request $request): JsonResponse
@@ -60,18 +121,19 @@ class AuthController extends Controller
     private function issueToken(User $user, string $name, int $status): JsonResponse
     {
         $plainTextToken = Str::random(64);
+        $expiresAt = now()->addDays(30);
         PersonalAccessToken::query()->create([
             'user_id' => $user->id,
             'name' => $name,
             'token_hash' => hash('sha256', $plainTextToken),
-            'expires_at' => now()->addDays(30),
+            'expires_at' => $expiresAt,
         ]);
 
         return response()->json([
-            'data' => $user->only(['id', 'name', 'email', 'created_at']),
+            'data' => $user->only(['id', 'name', 'email', 'email_verified_at', 'created_at']),
             'token_type' => 'Bearer',
             'access_token' => $plainTextToken,
-            'expires_at' => now()->addDays(30)->toIso8601String(),
+            'expires_at' => $expiresAt->toIso8601String(),
         ], $status);
     }
 }
