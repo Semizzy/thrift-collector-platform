@@ -18,8 +18,9 @@ final class TransactionPinTest extends TestCase
         $this->seed();
         $owner = User::query()->create([
             'name' => 'PIN Owner', 'email' => 'pin-owner@example.test',
-            'password' => 'strong-test-password', 'email_verified_at' => now(),
+            'password' => 'strong-test-password',
         ]);
+        $owner->forceFill(['email_verified_at' => now()])->save();
         $business = Business::query()->create([
             'name' => 'PIN Business', 'slug' => 'pin-business', 'country_code' => 'NG',
             'status' => 'active', 'created_by_user_id' => $owner->id,
