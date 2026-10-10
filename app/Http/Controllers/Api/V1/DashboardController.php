@@ -19,7 +19,7 @@ class DashboardController extends Controller
             ->where('user_id', $user->id)->where('status', 'active')
             ->with('business:id,name,country_code,status')->get();
 
-        $groupMemberships = \\App\\Models\\ThriftGroupMembership::query()
+        $groupMemberships = \App\Models\ThriftGroupMembership::query()
             ->where('user_id', $user->id)
             ->where('status', 'active')
             ->with(['group:id,business_id,name,description,currency_code,status,created_at'])
