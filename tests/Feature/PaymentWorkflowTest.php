@@ -81,6 +81,7 @@ final class PaymentWorkflowTest extends TestCase
     {
         [$owner, $reviewer, $business, $tokens] = $this->fixture();
         $headers = ['X-Business-Id' => (string) $business->id];
+        app(WalletLedgerService::class)->creditContribution((int) $business->id, (int) $owner->id, 'NGN', 12000, 90000, (int) $reviewer->id);
         $payload = [
             'provider' => 'manual', 'amount_minor' => 8000, 'currency_code' => 'NGN',
             'client_reference' => 'PAY-001', 'account_verification_id' => BankAccountVerification::query()->create([
