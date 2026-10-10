@@ -4,7 +4,7 @@ Multi-tenant software for daily thrift collection and rotating Ajo/Esusu groups,
 
 ## Current stage
 
-The Laravel 12/PHP foundation, versioned API, authentication and business-membership security foundations, country configuration, and automated checks are in progress. The first React/TypeScript Trust & Growth dashboard shell is now scaffolded with responsive user UI, empty states, light/dark mode, and a clearly marked admin preview. Dashboard data integrations and production admin authorization are not yet implemented. The complete product is not production-ready. Do not use this foundation to record real customer funds.
+The Laravel 12/PHP foundation, versioned API, authentication and business-membership security foundations, country configuration, and automated checks are in progress. The React/TypeScript Trust & Growth dashboard now signs in through the existing API and loads authenticated profile/workspace data. Server-side platform-admin API authorization is in place; the admin UI remains preview-only, with no privileged actions or live administrative metrics. The complete product is not production-ready. Do not use this foundation to record real customer funds.
 
 ## Product principles
 
