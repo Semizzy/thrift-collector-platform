@@ -71,6 +71,20 @@ Route::prefix('v1')->group(function (): void {
 
         Route::middleware(RequireBusinessMembership::class)->prefix('business')->group(function (): void {
             Route::get('/current', [BusinessController::class, 'current']);
+            Route::get('/payments/gateways', [PaymentWorkflowController::class, 'gateways'])
+                ->middleware(RequireBusinessPermission::class.':payments.manage');
+            Route::get('/payments/deposits', [PaymentWorkflowController::class, 'deposits']);
+            Route::post('/payments/deposits', [PaymentWorkflowController::class, 'createDeposit'])
+                ->middleware('throttle:10,1');
+            Route::post('/payments/deposits/{depositId}/review', [PaymentWorkflowController::class, 'reviewDeposit'])
+                ->whereNumber('depositId')->middleware(RequireBusinessPermission::class.':payments.manage');
+            Route::get('/payments/payouts', [PaymentWorkflowController::class, 'payouts']);
+            Route::post('/payments/payouts', [PaymentWorkflowController::class, 'createPayout'])
+                ->middleware('throttle:5,1');
+            Route::post('/payments/payouts/{payoutId}/decision', [PaymentWorkflowController::class, 'decidePayout'])
+                ->whereNumber('payoutId')->middleware(RequireBusinessPermission::class.':payments.manage');
+            Route::post('/payments/payouts/{payoutId}/manual-payment-evidence', [PaymentWorkflowController::class, 'confirmManualPayout'])
+                ->whereNumber('payoutId')->middleware(RequireBusinessPermission::class.':payments.manage');
             Route::get('/reconciliation/batches', [ReconciliationController::class, 'index'])
                 ->middleware(RequireBusinessPermission::class.':reconciliation.manage');
             Route::post('/reconciliation/batches', [ReconciliationController::class, 'store'])
