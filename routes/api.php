@@ -6,11 +6,15 @@ use App\Http\Controllers\Api\V1\BusinessController;
 use App\Http\Controllers\Api\V1\BusinessMembershipController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\AdminDashboardController;
+use App\Http\Controllers\Api\V1\ThriftGroupController;
+use App\Http\Controllers\Api\V1\ContributionRecordController;
+use App\Http\Controllers\Api\V1\PlatformAdminController;
 use App\Http\Middleware\AuthenticateApiToken;
 use App\Http\Middleware\EnsureVerifiedEmail;
 use App\Http\Middleware\RequireBusinessMembership;
 use App\Http\Middleware\RequireBusinessPermission;
 use App\Http\Middleware\RequirePlatformAdmin;
+use App\Http\Middleware\RequirePlatformPermission;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
@@ -29,8 +33,14 @@ Route::prefix('v1')->group(function (): void {
 
     Route::middleware(AuthenticateApiToken::class)->group(function (): void {
         Route::get('/dashboard/summary', [DashboardController::class, 'summary']);
+
         Route::middleware(RequirePlatformAdmin::class)->prefix('admin')->group(function (): void {
             Route::get('/dashboard', [AdminDashboardController::class, 'summary']);
+            Route::post('/users/{userId}/provision', [PlatformAdminController::class, 'provision'])
+                ->whereNumber('userId')
+                ->middleware(RequirePlatformPermission::class.':platform.admins.manage');
+            Route::get('/audit-events', [PlatformAdminController::class, 'auditEvents'])
+                ->middleware(RequirePlatformPermission::class.':platform.audit.view');
         });
     });
 
@@ -53,12 +63,25 @@ Route::prefix('v1')->group(function (): void {
     Route::middleware([AuthenticateApiToken::class, EnsureVerifiedEmail::class])->group(function (): void {
         Route::get('/businesses', [BusinessController::class, 'index']);
         Route::post('/businesses', [BusinessController::class, 'store'])->middleware('throttle:10,1');
-
         Route::post('/business/invitations/accept', [BusinessMembershipController::class, 'accept'])->middleware('throttle:10,1');
 
         Route::middleware(RequireBusinessMembership::class)->prefix('business')->group(function (): void {
             Route::get('/current', [BusinessController::class, 'current']);
-            Route::get('/groups', [ThriftGroupController::class, 'index'])\n                ->middleware(RequireBusinessPermission::class.':arrangements.view');\n            Route::post('/groups', [ThriftGroupController::class, 'store'])\n                ->middleware([RequireBusinessPermission::class.':arrangements.manage', 'throttle:10,1']);\n            Route::get('/groups/{groupId}/contributions', [ContributionRecordController::class, 'index'])\n                ->whereNumber('groupId')->middleware(RequireBusinessPermission::class.':arrangements.view');\n            Route::post('/groups/{groupId}/contributions', [ContributionRecordController::class, 'store'])\n                ->whereNumber('groupId')->middleware([RequireBusinessPermission::class.':contributions.record', 'throttle:20,1']);\n            Route::post('/groups/{groupId}/contributions/{recordId}/confirm', [ContributionRecordController::class, 'confirm'])\n                ->whereNumber('groupId')->whereNumber('recordId')->middleware(RequireBusinessPermission::class.':collections.confirm');\n            Route::get('/members', [BusinessMembershipController::class, 'index'])
+            Route::get('/groups', [ThriftGroupController::class, 'index'])
+                ->middleware(RequireBusinessPermission::class.':arrangements.view');
+            Route::post('/groups', [ThriftGroupController::class, 'store'])
+                ->middleware([RequireBusinessPermission::class.':arrangements.manage', 'throttle:10,1']);
+            Route::get('/groups/{groupId}/contributions', [ContributionRecordController::class, 'index'])
+                ->whereNumber('groupId')
+                ->middleware(RequireBusinessPermission::class.':arrangements.view');
+            Route::post('/groups/{groupId}/contributions', [ContributionRecordController::class, 'store'])
+                ->whereNumber('groupId')
+                ->middleware([RequireBusinessPermission::class.':contributions.record', 'throttle:20,1']);
+            Route::post('/groups/{groupId}/contributions/{recordId}/confirm', [ContributionRecordController::class, 'confirm'])
+                ->whereNumber('groupId')->whereNumber('recordId')
+                ->middleware(RequireBusinessPermission::class.':collections.confirm');
+
+            Route::get('/members', [BusinessMembershipController::class, 'index'])
                 ->middleware(RequireBusinessPermission::class.':members.view');
             Route::get('/audit-events', [BusinessMembershipController::class, 'auditEvents'])
                 ->middleware(RequireBusinessPermission::class.':members.view');
