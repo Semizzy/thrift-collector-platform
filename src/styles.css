@@ -114,3 +114,29 @@
 .payment-history-side > strong { font-size: 13px; }
 @media (min-width: 1000px) { .payment-workflow { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } .payment-workflow > .panel:nth-of-type(n+3), .payment-workflow > .auth-error, .payment-workflow > .account-success, .payment-workflow > .deposit-consent-note { grid-column: 1 / -1; } }
 @media (max-width: 560px) { .payment-history-row { gap: 10px; } .payment-history-side > strong { font-size: 11px; } .payment-history-side .status-pill { font-size: 9px; } }
+
+
+/* Member wallet and withdrawal ledger */
+.wallet-panel { display: grid; gap: 16px; }
+.wallet-balance-card { display: grid; gap: 8px; padding: 22px; border-radius: 16px; background: var(--surface-muted); border: 1px solid var(--border); }
+.wallet-balance-card > span { color: var(--muted); font-size: 13px; font-weight: 600; }
+.wallet-balance-card > strong { font-size: clamp(1.7rem, 4vw, 2.5rem); letter-spacing: -.04em; line-height: 1.1; }
+.wallet-balance-card > small { color: var(--muted); }
+.wallet-ledger-list { display: grid; }
+.wallet-ledger-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border); }
+.wallet-ledger-row:last-child { border-bottom: 0; }
+.wallet-ledger-icon { width: 36px; height: 36px; border-radius: 11px; display: grid; place-items: center; background: var(--surface-muted); }
+.wallet-ledger-icon.credit { color: var(--green); }
+.wallet-ledger-icon.debit { color: var(--amber); }
+.wallet-ledger-copy, .wallet-ledger-amount { display: grid; gap: 4px; min-width: 0; }
+.wallet-ledger-copy strong { overflow-wrap: anywhere; font-size: 13px; }
+.wallet-ledger-copy small, .wallet-ledger-amount small { color: var(--muted); font-size: 11px; }
+.wallet-ledger-amount { text-align: right; }
+.wallet-ledger-amount strong { font-size: 13px; white-space: nowrap; }
+.wallet-credit { color: var(--green); }
+.wallet-debit { color: var(--amber); }
+@media (max-width: 560px) {
+  .wallet-ledger-row { grid-template-columns: 34px minmax(0, 1fr); gap: 9px; }
+  .wallet-ledger-icon { width: 32px; height: 32px; }
+  .wallet-ledger-amount { grid-column: 2; text-align: left; display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+}
