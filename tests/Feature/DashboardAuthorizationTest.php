@@ -81,7 +81,7 @@ final class DashboardAuthorizationTest extends TestCase
             'email' => 'admin@example.test',
             'password' => 'a-strong-test-password',
         ]);
-        $admin->forceFill(['platform_role' => 'admin'])->save();
+        $admin->forceFill(['platform_role' => 'admin', 'platform_permissions' => ['platform.users.view']])->save();
         $token = str_repeat('z', 64);
         PersonalAccessToken::query()->create([
             'user_id' => $admin->id,
@@ -92,6 +92,7 @@ final class DashboardAuthorizationTest extends TestCase
 
         $this->withToken($token)->getJson('/api/v1/admin/dashboard')
             ->assertOk()
-            ->assertJsonPath('data.status', 'authorized_preview');
+            ->assertJsonPath('data.status', 'authorized_read_only')
+            ->assertJsonPath('data.financial_execution_enabled', false);
     }
 }
