@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\V1\ContributionRecordController;
 use App\Http\Controllers\Api\V1\ContributionScheduleController;
 use App\Http\Controllers\Api\V1\ContributionAdjustmentController;
 use App\Http\Controllers\Api\V1\ReconciliationController;
+use App\Http\Controllers\Api\V1\PaymentWorkflowController;
 use App\Http\Controllers\Api\V1\PlatformAdminController;
 use App\Http\Middleware\AuthenticateApiToken;
 use App\Http\Middleware\EnsureVerifiedEmail;
