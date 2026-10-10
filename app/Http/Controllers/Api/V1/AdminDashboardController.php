@@ -16,16 +16,19 @@ class AdminDashboardController extends Controller
 {
     public function summary(Request $request): JsonResponse
     {
-        $recentAudit = PlatformAuditEvent::query()
-            ->with(['actor:id,name', 'subject:id,name'])
-            ->orderByDesc('created_at')->limit(10)->get()
-            ->map(static fn (PlatformAuditEvent $event): array => [
+        $permissions = $request->user()->platform_permissions ?? [];
+        $recentAudit = is_array($permissions) && in_array('platform.audit.view', $permissions, true)
+            ? PlatformAuditEvent::query()
+                ->with(['actor:id,name', 'subject:id,name'])
+                ->orderByDesc('created_at')->limit(10)->get()
+                ->map(static fn (PlatformAuditEvent $event): array => [
                 'id' => $event->id,
                 'action' => $event->action,
                 'actor_name' => $event->actor?->name,
                 'subject_name' => $event->subject?->name,
                 'created_at' => $event->created_at,
-            ]);
+            ])
+            : collect();
 
         return response()->json([
             'data' => [
