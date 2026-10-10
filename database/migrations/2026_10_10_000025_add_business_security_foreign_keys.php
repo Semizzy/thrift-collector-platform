@@ -48,7 +48,26 @@ return new class extends Migration {
 
     public function down(): void
     {
-        // Keep referential-integrity constraints in place during rollback; removing them
-        // could silently weaken an existing database that already had these constraints.
+        $hasForeignKey = static function (string $tableName, string $columnName, string $referencedTable): bool {
+            return collect(Schema::getForeignKeys($tableName))->contains(
+                static fn (array $foreignKey): bool =>
+                    in_array($columnName, $foreignKey['columns'] ?? [], true)
+                    && ($foreignKey['foreign_table'] ?? null) === $referencedTable
+            );
+        };
+
+        foreach ([
+            ['business_audit_events', 'actor_user_id', 'users', 'business_audit_events_actor_user_id_foreign'],
+            ['business_audit_events', 'business_id', 'businesses', 'business_audit_events_business_id_foreign'],
+            ['business_membership_invitations', 'accepted_by_user_id', 'users', 'business_membership_invitations_accepted_by_user_id_foreign'],
+            ['business_membership_invitations', 'invited_by_user_id', 'users', 'business_membership_invitations_invited_by_user_id_foreign'],
+            ['business_membership_invitations', 'business_id', 'businesses', 'business_membership_invitations_business_id_foreign'],
+        ] as [$tableName, $columnName, $referencedTable, $constraintName]) {
+            if (Schema::hasTable($tableName) && $hasForeignKey($tableName, $columnName, $referencedTable)) {
+                Schema::table($tableName, static function (Blueprint $table) use ($constraintName): void {
+                    $table->dropForeign($constraintName);
+                });
+            }
+        }
     }
 };
