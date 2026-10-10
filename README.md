@@ -4,7 +4,7 @@ Multi-tenant software for daily thrift collection and rotating Ajo/Esusu groups,
 
 ## Current stage
 
-The Laravel 12/PHP foundation, versioned API, authentication and business-membership security foundations, country configuration, and automated checks are in progress. The React/TypeScript dashboard signs in through the existing API and loads the signed-in member's profile, active thrift groups, and that member's contribution records. Thrift group and contribution APIs are tenant-scoped, and contribution records distinguish recorded from confirmed without implying bank/provider settlement. Platform-admin provisioning and audit endpoints enforce explicit server-side permissions; the admin UI remains preview-only, with no live privileged controls or administrative metrics. The complete product is not production-ready. Do not use this foundation to record real customer funds.
+The Laravel 12/PHP foundation, versioned API, authentication and business-membership security foundations, country configuration, and automated checks are in progress. The React/TypeScript dashboard signs in through the existing API and loads the signed-in member's profile, active thrift groups, and that member's contribution records. Thrift group and contribution APIs are tenant-scoped, and contribution records distinguish recorded from confirmed without implying bank/provider settlement. Platform-admin provisioning and audit endpoints enforce explicit server-side permissions. The admin UI now loads protected read-only operational counts and audit events when the signed-in account has the required platform permission; privileged financial controls remain disabled. Contribution schedules, idempotent cycles and member obligations are implemented, while correction/reversal approvals remain audited decisions only. The complete product is not production-ready. Do not use this foundation to record real customer funds.
 
 ## Current domain/API scope
 
@@ -60,7 +60,7 @@ Run destructive migration commands only against a disposable local/test database
 - [cPanel deployment and release checklist](docs/cpanel-deployment.md)
 - [Responsive user/admin dashboard requirements](docs/responsive-dashboards.md)
 
-Confirm the host's PHP CLI version, extensions, database version, document-root options, cron path, and resource limits rather than assuming a plan supports them. The current dashboard shell is an early UI scaffold; the admin screen is preview-only and must not be treated as a protected administration interface. See the responsive dashboard specification for remaining acceptance checks.
+Confirm the host's PHP CLI version, extensions, database version, document-root options, cron path, and resource limits rather than assuming a plan supports them. The current dashboard shell is an early UI scaffold; the admin screen is a protected, read-only operations view; it does not expose financial execution or privileged mutation controls. See the responsive dashboard specification for remaining acceptance checks.
 
 ## Product documentation
 
