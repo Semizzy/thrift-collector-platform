@@ -415,7 +415,7 @@ final class PaymentWorkflowTest extends TestCase
     public function test_member_cannot_review_another_users_payout_without_payment_permission(): void
     {
         [$owner, , $business, $tokens] = $this->fixture();
-        $payout = \\App\\Models\\PayoutRequest::query()->create([
+        $payout = \App\Models\PayoutRequest::query()->create([
             'business_id' => $business->id, 'user_id' => $owner->id, 'provider' => 'manual',
             'method' => 'manual', 'status' => 'requested', 'amount_minor' => 5500,
             'currency_code' => 'NGN', 'destination_ciphertext' => json_encode(['bank_code' => '044', 'account_number' => 'encrypted-placeholder'], JSON_THROW_ON_ERROR),
