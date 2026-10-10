@@ -81,3 +81,14 @@
 .button-secondary { background: var(--surface, #fff); color: var(--text, #202939); border: 1px solid var(--border, #dbe2ea); }
 .review-decision-actions button:disabled { opacity: .55; cursor: not-allowed; }
 @media(max-width: 650px) { .deposit-review-card { padding: 12px; } .review-event-meta { align-items: flex-start; flex-direction: column; gap: 4px; } .review-decision-actions { align-items: stretch; } .review-decision-actions .button { flex: 1 1 100%; justify-content: center; } }
+
+
+/* Pending provider-assignment operations and transaction PIN */
+.review-escalation-form { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 4px; }
+.pin-status-row { display: flex; align-items: center; gap: 12px; margin: 18px 0 14px; }
+.status-warning { background: var(--amber-soft); color: var(--amber); }
+.pin-form { display: grid; gap: 9px; max-width: 480px; margin-top: 16px; }
+.pin-form label { font-size: 12px; font-weight: 700; margin-top: 6px; }
+.pin-form input { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); font: inherit; letter-spacing: .12em; }
+.pin-form .button { margin-top: 8px; }
+.transaction-pin-panel > .panel-heading > svg { color: var(--green); flex: 0 0 auto; }
