@@ -4,9 +4,13 @@ namespace Tests\Feature;
 
 use App\Models\Business;
 use App\Models\BusinessMembership;
+use App\Models\BankAccountVerification;
+use App\Models\PaymentGatewayConfig;
 use App\Models\PersonalAccessToken;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 final class PaymentWorkflowTest extends TestCase
@@ -72,7 +76,12 @@ final class PaymentWorkflowTest extends TestCase
         $headers = ['X-Business-Id' => (string) $business->id];
         $payload = [
             'provider' => 'manual', 'amount_minor' => 8000, 'currency_code' => 'NGN',
-            'client_reference' => 'PAY-001', 'destination' => 'Bank account details for test only',
+            'client_reference' => 'PAY-001', 'account_verification_id' => BankAccountVerification::query()->create([
+                'business_id' => $business->id, 'user_id' => $owner->id, 'verification_provider' => 'paystack',
+                'bank_code' => '044', 'bank_name' => 'Access Bank', 'account_number_ciphertext' => '0123456789',
+                'account_name_ciphertext' => 'TEST ACCOUNT HOLDER', 'status' => 'verified',
+                'verified_at' => now(), 'expires_at' => now()->addMinutes(10),
+            ])->id,
         ];
         $created = $this->withToken($tokens[$owner->id])->withHeaders($headers)
             ->postJson('/api/v1/business/payments/payouts', $payload)->assertCreated()
@@ -97,6 +106,39 @@ final class PaymentWorkflowTest extends TestCase
 
         $this->assertDatabaseHas('payout_requests', ['id' => $payoutId, 'status' => 'approved_manual_execution_pending']);
         $this->assertDatabaseHas('payment_operation_events', ['operation_type' => 'payout', 'operation_id' => $payoutId, 'event' => 'payout_approved_manual_execution_pending']);
+    }
+
+
+    public function test_account_name_resolution_returns_provider_verified_name_and_stores_sensitive_values_encrypted(): void
+    {
+        [$owner, , $business, $tokens] = $this->fixture();
+        PaymentGatewayConfig::query()->create([
+            'business_id' => $business->id, 'provider' => 'paystack', 'direction' => 'payout',
+            'status' => 'disabled', 'public_config' => ['environment' => 'sandbox'],
+            'credentials_ciphertext' => json_encode(['secret_key' => 'test-credential-value'], JSON_THROW_ON_ERROR),
+            'updated_by_user_id' => $owner->id,
+        ]);
+        Cache::put('paystack-ng-banks-'.$business->id, [
+            ['name' => 'Access Bank', 'code' => '044', 'country' => 'NG', 'supports_account_name_resolution' => true],
+        ], now()->addHour());
+        Http::fake([
+            'https://api.paystack.co/bank/resolve*' => Http::response([
+                'status' => true, 'message' => 'Account number resolved',
+                'data' => ['account_number' => '0123456789', 'account_name' => 'TEST ACCOUNT HOLDER'],
+            ], 200),
+        ]);
+
+        $response = $this->withToken($tokens[$owner->id])->withHeader('X-Business-Id', (string) $business->id)
+            ->postJson('/api/v1/business/payments/accounts/resolve', [
+                'bank_code' => '044', 'account_number' => '0123456789',
+            ])->assertOk()->assertJsonPath('data.account_name', 'TEST ACCOUNT HOLDER')
+                ->assertJsonPath('data.verified', true)
+                ->assertJsonPath('data.account_number_masked', '******6789');
+
+        $verificationId = $response->json('data.verification_id');
+        $this->assertDatabaseHas('bank_account_verifications', ['id' => $verificationId, 'status' => 'verified']);
+        $stored = \\Illuminate\\Support\\Facades\\DB::table('bank_account_verifications')->where('id', $verificationId)->value('account_number_ciphertext');
+        $this->assertStringNotContainsString('0123456789', $stored);
     }
 
     public function test_gateway_credentials_are_encrypted_and_configuration_cannot_enable_provider(): void
