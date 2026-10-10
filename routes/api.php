@@ -23,7 +23,8 @@ use App\Http\Middleware\RequirePlatformAdmin;
 use App\Http\Middleware\RequirePlatformPermission;
 use Illuminate\Support\Facades\Route;
 
-Route::prefix('v1')->group(function (): void {\n    Route::post('/webhooks/paystack', [PaystackWebhookController::class, 'handle'])->middleware('throttle:120,1');
+Route::prefix('v1')->group(function (): void {
+    Route::post('/webhooks/paystack', [PaystackWebhookController::class, 'handle'])->middleware('throttle:120,1');
     Route::get('/health', fn () => response()->json([
         'status' => 'ok',
         'service' => 'thrift-collector-platform-api',
@@ -74,7 +75,11 @@ Route::prefix('v1')->group(function (): void {\n    Route::post('/webhooks/payst
 
         Route::middleware(RequireBusinessMembership::class)->prefix('business')->group(function (): void {
             Route::get('/current', [BusinessController::class, 'current']);
-            Route::get('/payments/deposit-accounts', [UserDepositAccountController::class, 'index']);\n            Route::get('/payments/provider-deposits', [PaystackWebhookController::class, 'depositsForReview'])\n                ->middleware(RequireBusinessPermission::class.':reconciliation.manage');\n            Route::post('/payments/provider-deposits/{eventId}/review', [PaystackWebhookController::class, 'reviewDepositEvent'])\n                ->whereNumber('eventId')->middleware(RequireBusinessPermission::class.':reconciliation.manage');
+            Route::get('/payments/deposit-accounts', [UserDepositAccountController::class, 'index']);
+            Route::get('/payments/provider-deposits', [PaystackWebhookController::class, 'depositsForReview'])
+                ->middleware(RequireBusinessPermission::class.':reconciliation.manage');
+            Route::post('/payments/provider-deposits/{eventId}/review', [PaystackWebhookController::class, 'reviewDepositEvent'])
+                ->whereNumber('eventId')->middleware(RequireBusinessPermission::class.':reconciliation.manage');
             Route::get('/payments/deposit-accounts/banks', [UserDepositAccountController::class, 'availableBanks'])
                 ->middleware('throttle:30,1');
             Route::post('/payments/deposit-accounts', [UserDepositAccountController::class, 'requestAccount'])
