@@ -41,8 +41,8 @@ The React/TypeScript dashboard is compiled to `public/app/` by `npm run build`. 
 - Build on a trusted local machine or CI with Node.js 20 and `npm install && npm run build`; the shared host does not need to run a permanent Node process.
 - Deploy the generated `public/app/index.html` and `public/app/assets/` together with the matching Laravel code revision. Keep the `/app/` path intact because Vite emits asset URLs under `/app/`.
 - The Laravel web routes serve the SPA shell at `/`, `/dashboard`, and `/admin` when the build exists. Without a build, `/dashboard` and `/admin` return a clear HTTP 503 response instead of a blank page.
-- `/admin` is currently a static UI preview only. It has no live admin data, and platform-admin authentication/authorization is not implemented yet. Do not treat it as an operational or protected admin panel until server-side guards and permission-checked APIs are implemented and tested.
-- The frontend intentionally displays empty states and dashes until real authenticated API integrations exist. Do not replace them with fabricated financial metrics.
+- The member dashboard signs in through the existing API login endpoint and loads the current user's profile and active business workspaces from `GET /api/v1/dashboard/summary` using a short-lived browser-session bearer token. Contribution totals, thrift groups, schedules and transaction history remain unavailable until their verified domain models and endpoints exist.
+- `/admin` remains a static preview with no administrative actions or live metrics. The API route `GET /api/v1/admin/dashboard` is protected by token authentication and the database-backed `users.platform_role = admin` check; regular members receive HTTP 403. The migration defaults all existing/new users to `member`. Assign platform-admin role only through a reviewed, restricted operator process—never from a public registration or user-edit endpoint. Do not expose real administrative functions until their individual endpoints enforce permission checks and audit logging.
 
 ## Queues and scheduled jobs
 
