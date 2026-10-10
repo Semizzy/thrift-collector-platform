@@ -250,5 +250,4 @@ class PaymentWorkflowController extends Controller
             return response()->json(['data' => $payout, 'message' => 'Evidence review recorded. Even accepted manual evidence is not provider verification, settlement proof, or a ledger posting.']);
         });
     }
-    }
 }
