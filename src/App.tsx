@@ -215,20 +215,67 @@ function UserDashboard({ active }: { active: string }) {
   </>;
 }
 
+type AdminDashboardData = {
+  administrator: { id: number; name: string; email: string };
+  status: string;
+  metrics: {
+    registered_members: number;
+    active_businesses: number;
+    active_thrift_groups: number;
+    scheduled_cycles: number;
+    pending_adjustment_reviews: number;
+  };
+  recent_audit_events: Array<{ id: number; action: string; actor_name: string | null; subject_name: string | null; created_at: string }>;
+  financial_execution_enabled: false;
+  message: string;
+};
+
 function AdminDashboard({ active }: { active: string }) {
+  const [data, setData] = useState<AdminDashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    const token = sessionStorage.getItem('tcp_access_token') ?? '';
+    if (!token) {
+      setData(null);
+      setError('Sign in with an authorized platform-admin account to view operational metrics.');
+      setLoading(false);
+      return () => { cancelled = true; };
+    }
+    setLoading(true);
+    fetch('/api/v1/admin/dashboard', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } })
+      .then(async response => {
+        if (response.status === 401) throw new Error('Your session expired. Please sign in again.');
+        if (response.status === 403) throw new Error('Access denied. This account needs platform-admin status and the platform.users.view permission.');
+        if (!response.ok) throw new Error('The protected admin dashboard could not be loaded.');
+        return response.json() as Promise<{ data: AdminDashboardData }>;
+      })
+      .then(result => { if (!cancelled) { setData(result.data); setError(''); } })
+      .catch(reason => { if (!cancelled) { setData(null); setError(reason instanceof Error ? reason.message : 'Unable to load authorized admin data.'); } })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
   return <>
-    <SectionHeading eyebrow="PLATFORM ADMINISTRATION" title={active === 'Overview' ? 'Operations overview.' : active} description="A responsive admin workspace concept for secure platform operations." />
-    <div className="preview-warning"><ShieldCheck size={19} /><div><strong>Admin interface preview — access control not yet connected</strong><p>This screen contains no live member or financial data. Do not use it for administration until platform-admin authorization and protected API endpoints are implemented.</p></div></div>
-    <section className="stats-grid admin-stats" aria-label="Administrative metric placeholders">
-      <article className="stat-card"><div className="stat-top"><span>Registered members</span><span className="stat-icon"><Users size={19} /></span></div><div className="stat-value">—</div><div className="stat-foot muted">Awaiting authorized API</div></article>
-      <article className="stat-card"><div className="stat-top"><span>Active businesses</span><span className="stat-icon green"><LayoutDashboard size={19} /></span></div><div className="stat-value">—</div><div className="stat-foot muted">Awaiting authorized API</div></article>
-      <article className="stat-card"><div className="stat-top"><span>Reconciliation exceptions</span><span className="stat-icon amber"><ClipboardCheck size={19} /></span></div><div className="stat-value">—</div><div className="stat-foot muted">Awaiting authorized API</div></article>
-      <article className="stat-card"><div className="stat-top"><span>Pending approvals</span><span className="stat-icon red"><CreditCard size={19} /></span></div><div className="stat-value">—</div><div className="stat-foot muted">Awaiting authorized API</div></article>
-    </section>
-    <div className="content-grid admin-content-grid">
-      <section className="panel"><div className="panel-heading"><div><h2>Operational health</h2><p>Service health and background processing</p></div></div><EmptyPanel icon={Activity} title="Health checks not connected" body="Live service status will be shown after an authorized health endpoint is available." /></section>
-      <section className="panel"><div className="panel-heading"><div><h2>Needs attention</h2><p>Review queue and risk signals</p></div></div><EmptyPanel icon={ClipboardCheck} title="No live queue loaded" body="Approval and reconciliation items must come from protected, permission-checked endpoints." /></section>
-    </div>
-    <section className="panel security-note"><div className="assurance-icon"><ShieldCheck size={21} /></div><div><strong>Security before administration</strong><p>Platform-admin roles, server-side route guards, audit events and maker-checker controls must be implemented before any privileged action is enabled.</p></div></section>
+    <SectionHeading eyebrow="PLATFORM ADMINISTRATION" title={active === 'Overview' ? 'Operations overview.' : active} description="Protected, read-only operational data from the authenticated platform API." />
+    <div className="preview-warning"><ShieldCheck size={19} /><div><strong>Read-only administration</strong><p>{data?.message ?? 'No financial execution, ledger posting, payouts, or provider settlement actions are exposed in this dashboard.'}</p></div></div>
+    {loading ? <section className="panel"><EmptyPanel icon={Activity} title="Loading protected data" body="Checking your platform permissions and retrieving current operational counts." /></section>
+      : error ? <section className="panel"><EmptyPanel icon={ShieldCheck} title="Admin data unavailable" body={error} /></section>
+      : data ? <>
+        <div className="admin-api-meta"><span>Authorized as <strong>{data.administrator.name}</strong></span><span className="status-pill status-neutral">Read-only</span></div>
+        <section className="stats-grid admin-stats" aria-label="Authorized operational metrics">
+          <article className="stat-card"><div className="stat-top"><span>Registered members</span><span className="stat-icon"><Users size={19} /></span></div><div className="stat-value">{data.metrics.registered_members.toLocaleString()}</div><div className="stat-foot muted">All platform accounts</div></article>
+          <article className="stat-card"><div className="stat-top"><span>Active businesses</span><span className="stat-icon green"><LayoutDashboard size={19} /></span></div><div className="stat-value">{data.metrics.active_businesses.toLocaleString()}</div><div className="stat-foot muted">Active workspaces</div></article>
+          <article className="stat-card"><div className="stat-top"><span>Active thrift groups</span><span className="stat-icon"><Users size={19} /></span></div><div className="stat-value">{data.metrics.active_thrift_groups.toLocaleString()}</div><div className="stat-foot muted">Group records marked active</div></article>
+          <article className="stat-card"><div className="stat-top"><span>Scheduled cycles</span><span className="stat-icon amber"><CalendarClock size={19} /></span></div><div className="stat-value">{data.metrics.scheduled_cycles.toLocaleString()}</div><div className="stat-foot muted">No collection initiated</div></article>
+          <article className="stat-card"><div className="stat-top"><span>Pending adjustment reviews</span><span className="stat-icon red"><ClipboardCheck size={19} /></span></div><div className="stat-value">{data.metrics.pending_adjustment_reviews.toLocaleString()}</div><div className="stat-foot muted">Require independent review</div></article>
+        </section>
+        <section className="panel"><div className="panel-heading"><div><h2>Recent platform audit events</h2><p>Administrative activity history, newest first</p></div></div>
+          {data.recent_audit_events.length ? <div className="contribution-list">{data.recent_audit_events.map(event => <div className="check-row" key={event.id}><span className="check-number"><ShieldCheck size={17} /></span><div><strong>{event.action.replaceAll('.', ' ')}</strong><p>{event.actor_name ?? 'System/unknown actor'}{event.subject_name ? ` · ${event.subject_name}` : ''}</p></div><div className="contribution-amount"><small>{new Date(event.created_at).toLocaleString()}</small></div></div>)}</div> : <EmptyPanel icon={Activity} title="No platform audit events yet" body="New audited administrative changes will appear here." />}
+        </section>
+        <section className="panel security-note"><div className="assurance-icon"><ShieldCheck size={21} /></div><div><strong>Financial execution remains disabled</strong><p>Cycle generation only creates due-date records. Correction/reversal approval records a decision and does not mutate contribution records or post financial ledger entries.</p></div></section>
+      </> : null}
   </>;
 }
