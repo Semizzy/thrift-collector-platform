@@ -388,4 +388,60 @@ final class PaymentWorkflowTest extends TestCase
         $this->assertTrue(Hash::check('5831', $stored));
     }
 
+
+    public function test_duplicate_deposit_reference_with_changed_purpose_is_rejected_and_does_not_duplicate_request(): void
+    {
+        [$owner, , $business, $tokens] = $this->fixture();
+        $headers = ['X-Business-Id' => (string) $business->id];
+        $payload = [
+            'provider' => 'manual', 'amount_minor' => 12000, 'currency_code' => 'NGN',
+            'client_reference' => 'PURPOSE-IDEMPOTENCY-01', 'transaction_pin' => '2468',
+            'purpose' => 'Monthly thrift savings',
+        ];
+        $this->withToken($tokens[$owner->id])->withHeaders($headers)
+            ->postJson('/api/v1/business/payments/deposits', $payload)->assertCreated();
+
+        $this->withToken($tokens[$owner->id])->withHeaders($headers)
+            ->postJson('/api/v1/business/payments/deposits', [...$payload, 'purpose' => 'Unrelated purchase'])
+            ->assertStatus(409);
+
+        $this->assertDatabaseCount('deposit_intents', 1);
+        $this->assertDatabaseHas('deposit_intents', [
+            'business_id' => $business->id, 'client_reference' => 'PURPOSE-IDEMPOTENCY-01',
+            'purpose' => 'Monthly thrift savings',
+        ]);
+    }
+
+    public function test_member_cannot_review_another_users_payout_without_payment_permission(): void
+    {
+        [$owner, , $business, $tokens] = $this->fixture();
+        $payout = \\App\\Models\\PayoutRequest::query()->create([
+            'business_id' => $business->id, 'user_id' => $owner->id, 'provider' => 'manual',
+            'method' => 'manual', 'status' => 'requested', 'amount_minor' => 5500,
+            'currency_code' => 'NGN', 'destination_ciphertext' => json_encode(['bank_code' => '044', 'account_number' => 'encrypted-placeholder'], JSON_THROW_ON_ERROR),
+            'client_reference' => 'UNAUTH-PAYOUT-01', 'purpose' => 'Emergency household expense',
+        ]);
+        $contributor = User::query()->create([
+            'name' => 'Read Only Payout Member', 'email' => 'payout-contributor@example.test',
+            'password' => 'strong-test-password', 'email_verified_at' => now(),
+        ]);
+        BusinessMembership::query()->create([
+            'business_id' => $business->id, 'user_id' => $contributor->id,
+            'role' => 'contributor', 'status' => 'active', 'joined_at' => now(),
+        ]);
+        $plain = str_repeat('p', 64);
+        PersonalAccessToken::query()->create([
+            'user_id' => $contributor->id, 'name' => 'payout-contributor-test',
+            'token_hash' => hash('sha256', $plain), 'expires_at' => now()->addDay(),
+        ]);
+
+        $this->withToken($plain)->withHeader('X-Business-Id', (string) $business->id)
+            ->postJson('/api/v1/business/payments/payouts/'.$payout->id.'/decision', [
+                'decision' => 'approve', 'reason' => 'Attempted unauthorized approval.',
+            ])->assertForbidden();
+
+        $this->assertDatabaseHas('payout_requests', ['id' => $payout->id, 'status' => 'requested']);
+    }
+
+
 }
