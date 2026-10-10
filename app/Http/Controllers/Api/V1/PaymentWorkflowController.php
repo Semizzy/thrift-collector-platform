@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\BusinessAuditEvent;
+use App\Models\BankAccountVerification;
 use App\Models\DepositIntent;
 use App\Models\PaymentGatewayConfig;
 use App\Models\PaymentOperationEvent;
@@ -150,17 +151,35 @@ class PaymentWorkflowController extends Controller
             'amount_minor' => ['required', 'integer', 'min:1', 'max:1000000000000'],
             'currency_code' => ['required', 'string', 'size:3', 'regex:/^[A-Z]{3}$/'],
             'client_reference' => ['required', 'string', 'max:100', 'regex:/^[A-Za-z0-9._:-]+$/'],
-            'destination' => ['required', 'string', 'min:3', 'max:1500'],
+            'account_verification_id' => ['required', 'integer', 'min:1'],
         ]);
         if ($data['provider'] !== 'manual') {
             return response()->json(['message' => 'This provider is not enabled for live payouts. No payout was sent.'], 503);
         }
-        $payout = DB::transaction(function () use ($request, $business, $data): PayoutRequest {
+        $verification = BankAccountVerification::query()
+            ->where('business_id', $business->id)
+            ->where('user_id', $request->user()->id)
+            ->where('status', 'verified')
+            ->where('expires_at', '>', now())
+            ->whereKey($data['account_verification_id'])
+            ->first();
+        if (! $verification) {
+            return response()->json(['message' => 'Verify the destination bank account again before submitting this payout.'], 422);
+        }
+        $destination = json_encode([
+            'bank_code' => $verification->bank_code,
+            'bank_name' => $verification->bank_name,
+            'account_number' => $verification->account_number_ciphertext,
+            'account_name' => $verification->account_name_ciphertext,
+            'verification_provider' => $verification->verification_provider,
+            'verification_id' => $verification->id,
+        ], JSON_THROW_ON_ERROR);
+        $payout = DB::transaction(function () use ($request, $business, $data, $destination, $verification): PayoutRequest {
             $payout = PayoutRequest::query()->firstOrCreate(
                 ['business_id' => $business->id, 'client_reference' => $data['client_reference']],
                 ['user_id' => $request->user()->id, 'provider' => 'manual', 'method' => 'manual',
                     'status' => 'requested', 'amount_minor' => $data['amount_minor'],
-                    'currency_code' => $data['currency_code'], 'destination_ciphertext' => $data['destination']]
+                    'currency_code' => $data['currency_code'], 'destination_ciphertext' => $destination]
             );
             if ($payout->user_id !== $request->user()->id || $payout->amount_minor !== (int) $data['amount_minor'] || $payout->currency_code !== $data['currency_code']) {
                 abort(409, 'Idempotency reference was already used with different payout details.');
@@ -168,7 +187,7 @@ class PaymentWorkflowController extends Controller
             if ($payout->wasRecentlyCreated) PaymentOperationEvent::query()->create([
                 'business_id' => $business->id, 'operation_type' => 'payout', 'operation_id' => $payout->id,
                 'actor_user_id' => $request->user()->id, 'event' => 'payout_requested',
-                'reason' => 'Request recorded; no funds were reserved or transferred.', 'evidence' => ['provider' => 'manual'], 'created_at' => now(),
+                'reason' => 'Request recorded with a recently verified bank account; no funds were reserved or transferred.', 'evidence' => ['provider' => 'manual', 'bank_verification_id' => $verification->id, 'bank_code' => $verification->bank_code], 'created_at' => now(),
             ]);
             return $payout;
         });
