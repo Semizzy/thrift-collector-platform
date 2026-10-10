@@ -13,6 +13,7 @@ const userNav: NavItem[] = [
   { label: 'Overview', icon: Home },
   { label: 'My groups', icon: Users },
   { label: 'Contributions', icon: Wallet },
+  { label: 'Wallet', icon: Wallet },
   { label: 'Deposit & payout', icon: ArrowDownLeft },
   { label: 'Bank accounts', icon: Landmark },
   { label: 'Deposit review', icon: ClipboardCheck },
@@ -135,6 +136,8 @@ function PaymentHistoryRow({ item }: { item: PaymentRequest }) {
 type DashboardProfile = { id: number; name: string; email: string; email_verified_at: string | null };
 type DepositAccount = { id: number; provider: string; bank_code: string; bank_name: string; account_number: string | null; account_name: string | null; currency_code: string; status: string; assigned_at: string | null };
 type DepositBank = { code: string; name: string; provider: string; currency_code: string };
+type WalletSummary = { currency_code: string; balance_minor: number; withdrawals_enabled_for_live_execution: boolean; message: string };
+type WalletEntry = { id: number; direction: 'debit' | 'credit'; amount_minor: number; balance_after_minor: number; created_at: string; source_type: string; source_id: number; description: string; idempotency_key: string };
 type PaymentRequest = { id: number; provider: string; method: string; status: string; amount_minor: number; currency_code: string; client_reference: string; provider_reference: string | null; purpose: string | null; review_reason?: string | null; decision_reason?: string | null; created_at: string; reviewed_at?: string | null; approved_at?: string | null; paid_confirmed_at?: string | null };
 type PayoutBank = { code: string; name: string; country?: string; supports_account_name_resolution?: boolean };
 type PendingAccountDiagnostic = { id: number; bank_name: string; bank_code: string; currency_code: string; status: string; created_at: string | null; age_minutes: number; recovery_attempts: number; last_recovery_at: string | null; last_recovery_result: string | null; has_provider_customer_reference: boolean; has_provider_account_reference: boolean; diagnostic_code: string; recommended_action: string; escalation: { id: number; status: string; created_at: string } | null };
@@ -201,6 +204,11 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   const [payoutReference, setPayoutReference] = useState('');
   const [payoutBankCode, setPayoutBankCode] = useState('');
   const [payoutAccountNumber, setPayoutAccountNumber] = useState('');
+  const [walletSummary, setWalletSummary] = useState<WalletSummary | null>(null);
+  const [walletEntries, setWalletEntries] = useState<WalletEntry[]>([]);
+  const [walletLoading, setWalletLoading] = useState(false);
+  const [walletError, setWalletError] = useState('');
+  const [walletRefreshKey, setWalletRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!token) { setAuthLoading(false); setProfile(null); setDashboardData(null); return; }
@@ -369,6 +377,22 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
       setAccountError('Copy was unavailable in this browser. Please select the account number and copy it manually.');
     }
   }
+
+  useEffect(() => {
+    if (!token || !selectedBusinessId || !['Wallet', 'Overview', 'Deposit & payout'].includes(active)) return;
+    let cancelled = false;
+    setWalletLoading(true); setWalletError('');
+    const country = dashboardData?.workspaces.find(workspace => String(workspace.id) === selectedBusinessId)?.country_code;
+    const currency = country === 'GH' ? 'GHS' : 'NGN';
+    const headers = { Authorization: 'Bearer ' + token, Accept: 'application/json', 'X-Business-Id': selectedBusinessId };
+    Promise.all([
+      fetch('/api/v1/business/wallet?currency_code=' + currency, { headers }).then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.message ?? 'Could not load wallet balance.'); return result.data as WalletSummary; }),
+      fetch('/api/v1/business/wallet/ledger?currency_code=' + currency + '&limit=20', { headers }).then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.message ?? 'Could not load wallet ledger.'); return result.data as WalletEntry[]; }),
+    ]).then(([summary, entries]) => { if (!cancelled) { setWalletSummary(summary); setWalletEntries(entries); } })
+      .catch(error => { if (!cancelled) setWalletError(error instanceof Error ? error.message : 'Could not load wallet data.'); })
+      .finally(() => { if (!cancelled) setWalletLoading(false); });
+    return () => { cancelled = true; };
+  }, [token, selectedBusinessId, active, walletRefreshKey, dashboardData]);
 
   useEffect(() => {
     if (!token || !selectedBusinessId || active !== 'Deposit & payout') return;
@@ -540,9 +564,17 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
     <p className="deposit-consent-note">A review records evidence status only. It does not verify final settlement or credit a member balance. The account holder cannot review their own event.</p>
   </section>;
 
+  const walletPanel = <section className="panel wallet-panel">
+    <div className="panel-heading"><div><h2>My savings wallet</h2><p>Confirmed cash contributions and independently reconciled deposits, less withdrawal requests.</p></div><button className="text-button" onClick={() => setWalletRefreshKey(value => value + 1)}><RefreshCw size={15} /> Refresh</button></div>
+    {walletError && <p className="auth-error" role="alert">{walletError}</p>}
+    <div className="wallet-balance-card"><span>Available wallet balance</span><strong>{walletSummary ? new Intl.NumberFormat('en-NG', { style: 'currency', currency: walletSummary.currency_code }).format(walletSummary.balance_minor / 100) : '—'}</strong><small>{walletSummary?.currency_code ?? 'NGN'} · amounts shown in major currency units</small></div>
+    {walletLoading ? <p className="muted">Loading wallet ledger…</p> : walletEntries.length ? <div className="wallet-ledger-list">{walletEntries.map(entry => <article className="wallet-ledger-row" key={entry.id}><span className={'wallet-ledger-icon ' + entry.direction}>{entry.direction === 'credit' ? <ArrowDownLeft size={17} /> : <ArrowRight size={17} />}</span><div className="wallet-ledger-copy"><strong>{entry.description}</strong><small>{entry.source_type.replaceAll('_', ' ')} #{entry.source_id} · {new Date(entry.created_at).toLocaleString()}</small></div><div className="wallet-ledger-amount"><strong className={entry.direction === 'credit' ? 'wallet-credit' : 'wallet-debit'}>{entry.direction === 'credit' ? '+' : '−'}{new Intl.NumberFormat('en-NG', { style: 'currency', currency: walletSummary?.currency_code ?? 'NGN' }).format(entry.amount_minor / 100)}</strong><small>Balance {new Intl.NumberFormat('en-NG', { style: 'currency', currency: walletSummary?.currency_code ?? 'NGN' }).format(entry.balance_after_minor / 100)}</small></div></article>)}</div> : <div className="deposit-empty"><Wallet size={22} /><strong>No wallet entries yet</strong><p>Cash contributions credited after independent confirmation and non-cash savings matched during reconciliation will appear here.</p></div>}
+    <p className="deposit-consent-note">Every wallet movement is double-entry and idempotent. A withdrawal is deducted when requested; rejected or confirmed failed withdrawals are refunded once. Live bank transfers remain disabled until release gates are approved.</p>
+  </section>;
+
   const paymentRequestsPanel = <div className="payment-workflow">
     <section className="panel">
-      <div className="panel-heading"><div><h2>Request a deposit</h2><p>Record a manual deposit for independent review. Submitting a request does not add funds to your balance.</p></div><ArrowDownLeft size={22} /></div>
+      <div className="panel-heading"><div><h2>Request a deposit</h2><p>Record a manual deposit request for independent review. A request alone does not credit your wallet; savings are credited after the contribution is confirmed or the deposit is reconciled.</p></div><ArrowDownLeft size={22} /></div>
       <form className="pin-form" onSubmit={submitDepositRequest}>
         <label htmlFor="deposit-amount">Amount ({dashboardData?.workspaces.find(workspace => String(workspace.id) === selectedBusinessId)?.country_code === 'GH' ? 'GHS' : 'NGN'})</label><input id="deposit-amount" type="number" min="1" step="0.01" required value={depositAmount} onChange={event => setDepositAmount(event.target.value)} />
         <label htmlFor="deposit-purpose">Purpose of deposit</label><input id="deposit-purpose" minLength={3} maxLength={255} required value={depositPurpose} onChange={event => setDepositPurpose(event.target.value)} placeholder="e.g. October thrift contribution" />
@@ -552,7 +584,7 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
       </form>
     </section>
     <section className="panel">
-      <div className="panel-heading"><div><h2>Request a payout</h2><p>Verify a bank account and submit a payout request for independent approval. No transfer is executed.</p></div><ArrowRight size={22} /></div>
+      <div className="panel-heading"><div><h2>Request a payout</h2><p>Verify a bank account and submit a withdrawal request. The amount is deducted from your wallet immediately and held while the request is reviewed; this screen does not execute a bank transfer.</p></div><ArrowRight size={22} /></div>
       {!paymentBanks.length && <p className="deposit-consent-note">The bank directory is unavailable. Payout requests require administrator-configured account verification credentials; deposit requests and history remain available.</p>}
       <form className="pin-form" onSubmit={submitPayoutRequest}>
         <label htmlFor="payout-amount">Amount ({dashboardData?.workspaces.find(workspace => String(workspace.id) === selectedBusinessId)?.country_code === 'GH' ? 'GHS' : 'NGN'})</label><input id="payout-amount" type="number" min="1" step="0.01" required value={payoutAmount} onChange={event => setPayoutAmount(event.target.value)} />
@@ -572,7 +604,7 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
     <section className="panel"><div className="panel-heading"><div><h2>Payout request history</h2><p>Approval status is not proof that a transfer was made.</p></div></div>
       {paymentLoading ? <p className="muted">Loading request history…</p> : payoutRequests.length ? <div className="payment-history">{payoutRequests.map(item => <PaymentHistoryRow key={'payout-'+item.id} item={item} />)}</div> : <EmptyPanel icon={ArrowRight} title="No payout requests" body="Your submitted payout requests will appear here." />}
     </section>
-    <p className="deposit-consent-note">Live provider payments and payouts remain disabled. These forms create reviewable requests only; no wallet credit, ledger posting, or bank transfer occurs.</p>
+    <p className="deposit-consent-note">Wallet debits and credits are recorded in the immutable ledger. Provider execution remains disabled: approval is not proof of transfer, and ambiguous transfer outcomes stay debited until reconciled.</p>
   </div>;
 
   const transactionPinPanel = <section className="panel transaction-pin-panel">
@@ -650,7 +682,9 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
 
   if (active === 'Account operations') return <><SectionHeading eyebrow="BUSINESS WORKSPACE · AUTHORIZED OPERATIONS" title="Pending account operations" description="Diagnose repeated or long-running provider assignments and escalate them for support follow-up." />{accountOperationsPanel}</>;
 
-  if (active === 'Deposit & payout') return <><SectionHeading eyebrow="MEMBER WORKSPACE · PAYMENT REQUESTS" title="Deposits & payouts" description="Submit requests with a purpose and transaction PIN, then follow their review status." />{paymentRequestsPanel}</>;
+  if (active === 'Wallet') return <><SectionHeading eyebrow="MEMBER WORKSPACE · SAVINGS BALANCE" title="My wallet" description="See available savings, wallet credits and withdrawal deductions with a traceable ledger." />{walletPanel}</>;
+
+  if (active === 'Deposit & payout') return <><SectionHeading eyebrow="MEMBER WORKSPACE · PAYMENT REQUESTS" title="Deposits & withdrawals" description="Submit requests with a purpose and transaction PIN, and follow the wallet and review status." />{walletPanel}{paymentRequestsPanel}</>;
 
   if (active === 'Security & PIN') return <><SectionHeading eyebrow="ACCOUNT SECURITY" title="Security & transaction PIN" description="Set or update the PIN used to confirm payment requests." />{transactionPinPanel}</>;
 
@@ -671,6 +705,7 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   return <>
     <SectionHeading eyebrow="MEMBER WORKSPACE" title={profile ? `Welcome back, ${profile.name.split(' ')[0]}.` : 'Your savings, at a glance.'} description={profile ? `Signed in as ${profile.email}. Your dashboard uses authenticated account data.` : 'Welcome to your personal thrift workspace. Your confirmed activity will appear here.'} />
     <div className="notice"><div className="notice-symbol"><Activity size={18} /></div><div className="notice-copy"><strong>Account data connected securely</strong><p>Your profile, active thrift groups and contribution records are loaded from the authenticated API. Financial totals remain hidden until verified contribution records exist.</p></div><button className="text-button signout-button" onClick={signOut}><LogOut size={15} /> Sign out</button></div>
+    {walletPanel}
     {depositAccountsPanel}
     <section className="stats-grid" aria-label="Account summary">
       <article className="stat-card stat-featured"><div className="stat-top"><span>Total confirmed contributions</span><span className="stat-icon"><Wallet size={19} /></span></div><div className="stat-value">{dashboardData?.confirmed_contribution_totals.length ? dashboardData.confirmed_contribution_totals.map(total => `${total.currency_code} ${new Intl.NumberFormat('en-NG', { maximumFractionDigits: 2 }).format(total.total_minor / 100)}`).join(' · ') : '—'}</div><div className="stat-foot"><span className="status-pill status-neutral"><Activity size={13} /> Confirmed records only</span></div></article>
