@@ -37,3 +37,8 @@
   .contribution-amount strong { font-size: 11px; }
   .contribution-amount small { font-size: 10px; }
 }
+
+
+.admin-api-meta { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 0 0 18px; color: var(--muted, #687386); font-size: 13px; }
+.admin-api-meta strong { color: var(--text, #202939); }
+@media (max-width: 480px) { .admin-api-meta { align-items: flex-start; flex-direction: column; } }
