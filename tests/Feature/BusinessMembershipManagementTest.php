@@ -30,7 +30,6 @@ final class BusinessMembershipManagementTest extends TestCase
 
         $response->assertCreated()->assertJsonPath('data.role', 'field_agent');
         $invitation = BusinessMembershipInvitation::query()->firstOrFail();
-        self::assertSame(hash('sha256', 'not-the-raw-token'), $invitation->token_hash === hash('sha256', 'not-the-raw-token') ? $invitation->token_hash : 'different');
         self::assertSame(64, strlen($invitation->token_hash));
         self::assertNotSame('new.member@example.test', $invitation->token_hash);
         $this->assertDatabaseHas('business_audit_events', [
