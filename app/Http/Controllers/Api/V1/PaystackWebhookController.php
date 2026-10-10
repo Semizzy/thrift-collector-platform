@@ -100,7 +100,7 @@ class PaystackWebhookController extends Controller
             }
             if (! $account && $customerCode !== '') {
                 $candidateQuery = (clone $baseAccountQuery)->where('provider_customer_id', $customerCode);
-                if (in_array($eventType, ['dedicated_account.assign.success', 'dedicated_account.assign.failed', 'dedicated_account.assign.failure'], true)) {
+                if (in_array($eventType, ['dedicated_account.assign.success', 'dedicated_account.assign.failed', 'dedicated_account.assign.failure', 'dedicatedaccount.assign.success', 'dedicatedaccount.assign.failed', 'dedicatedaccount.assign.failure'], true)) {
                     $candidateQuery->where('status', 'provisioning');
                     if (! empty($bank['slug'])) $candidateQuery->where('bank_code', (string) $bank['slug']);
                     elseif (! empty($bank['name'])) $candidateQuery->where('bank_name', (string) $bank['name']);
@@ -113,7 +113,7 @@ class PaystackWebhookController extends Controller
                 }
             }
 
-            if (in_array($eventType, ['dedicated_account.assign.success', 'dedicated_account.assign.failed', 'dedicated_account.assign.failure'], true)) {
+            if (in_array($eventType, ['dedicated_account.assign.success', 'dedicated_account.assign.failed', 'dedicated_account.assign.failure', 'dedicatedaccount.assign.success', 'dedicatedaccount.assign.failed', 'dedicatedaccount.assign.failure'], true)) {
                 if ($account) {
                     $failed = str_ends_with($eventType, 'failed') || str_ends_with($eventType, 'failure');
                     $assigned = ! $failed && $accountNumber !== '' && $accountName !== '';
