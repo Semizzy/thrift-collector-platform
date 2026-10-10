@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   domain-tests:
-    name: PHP domain tests
+    name: PHP domain and application checks
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -24,6 +24,7 @@ jobs:
           php-version: '8.2'
           tools: composer:v2
           coverage: none
+          extensions: pdo_sqlite
 
       - name: Validate Composer configuration
         run: composer validate --no-check-publish
@@ -36,3 +37,27 @@ jobs:
 
       - name: Run domain tests
         run: composer test
+
+      - name: Verify Laravel boots and routes register
+        run: php artisan route:list --except-vendor
+        env:
+          APP_ENV: testing
+          APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ':memory:'
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+          LOG_CHANNEL: stderr
+
+      - name: Verify migrations and country seed
+        run: php artisan migrate:fresh --seed --force
+        env:
+          APP_ENV: testing
+          APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ':memory:'
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+          LOG_CHANNEL: stderr
