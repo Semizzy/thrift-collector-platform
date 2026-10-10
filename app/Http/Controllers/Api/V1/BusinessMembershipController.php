@@ -199,6 +199,9 @@ class BusinessMembershipController extends Controller
             if ($target->role === 'business_owner') {
                 return response()->json(['message' => 'Owner role changes require a separate ownership-transfer workflow.'], 403);
             }
+            if ($actorMembership->role === 'business_manager' && $target->role === 'business_manager') {
+                return response()->json(['message' => 'Managers cannot change another manager\'s role.'], 403);
+            }
 
             $oldRole = $target->role;
             $target->forceFill(['role' => $data['role']])->save();
@@ -225,6 +228,9 @@ class BusinessMembershipController extends Controller
             }
             if ($target->role === 'business_owner') {
                 return response()->json(['message' => 'Owner membership cannot be removed through this endpoint.'], 403);
+            }
+            if ($actorMembership->role === 'business_manager' && $target->role === 'business_manager') {
+                return response()->json(['message' => 'Managers cannot remove another manager.'], 403);
             }
 
             $target->forceFill(['status' => 'inactive'])->save();
