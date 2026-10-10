@@ -60,10 +60,18 @@ final class ThriftDashboardAndPlatformAdminTest extends TestCase
             'thrift_group_id' => $group->id, 'user_id' => $user->id,
             'role' => 'organizer', 'status' => 'active', 'joined_at' => now(),
         ]);
+        $collector = User::query()->create([
+            'name' => 'Independent Collector', 'email' => 'collector@example.test',
+            'password' => 'a-strong-test-password', 'email_verified_at' => now(),
+        ]);
+        ThriftGroupMembership::query()->create([
+            'thrift_group_id' => $group->id, 'user_id' => $collector->id,
+            'role' => 'member', 'status' => 'active', 'joined_at' => now(),
+        ]);
         ContributionRecord::query()->create([
-            'thrift_group_id' => $group->id, 'user_id' => $user->id, 'recorded_by_user_id' => $user->id,
+            'thrift_group_id' => $group->id, 'user_id' => $user->id, 'recorded_by_user_id' => $collector->id,
             'amount_minor' => 250000, 'currency_code' => 'NGN', 'status' => 'confirmed',
-            'collection_method' => 'cash', 'confirmed_by_user_id' => $user->id, 'confirmed_at' => now(),
+            'collection_method' => 'cash', 'confirmed_by_user_id' => $collector->id, 'confirmed_at' => now(),
         ]);
         $token = $this->tokenFor($user, str_repeat('a', 64));
 
