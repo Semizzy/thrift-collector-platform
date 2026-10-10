@@ -64,3 +64,20 @@
 .deposit-consent-note { color: var(--muted, #687386); margin-top: 10px; }
 .account-success { color: var(--green, #16805d); font-size: 12px; }
 @media(max-width: 650px) { .deposit-account-list { grid-template-columns: minmax(0, 1fr); } .deposit-account-controls { grid-template-columns: minmax(0, 1fr); } .deposit-account-controls .button { width: 100%; justify-content: center; } }
+
+
+.deposit-review-panel { margin-bottom: 22px; }
+.deposit-review-list { display: grid; gap: 14px; margin-top: 15px; }
+.deposit-review-card { border: 1px solid var(--border, #e3e8ef); border-radius: 13px; padding: 16px; background: var(--surface, #fff); }
+.review-event-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.review-event-heading strong { font-size: 13px; }
+.review-event-heading p { font-size: 11px; color: var(--muted, #687386); margin: 4px 0; overflow-wrap: anywhere; }
+.review-event-meta { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0 4px; }
+.review-event-meta strong { font-size: 18px; }
+.review-event-meta span, .review-event-note { font-size: 11px; color: var(--muted, #687386); }
+.review-reason-label { display: grid; gap: 7px; font-size: 12px; font-weight: 700; margin: 14px 0 10px; }
+.review-reason-label textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--border, #dbe2ea); border-radius: 10px; background: var(--surface, #fff); color: inherit; padding: 10px 12px; resize: vertical; font: inherit; font-weight: 400; line-height: 1.5; }
+.review-decision-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+.button-secondary { background: var(--surface, #fff); color: var(--text, #202939); border: 1px solid var(--border, #dbe2ea); }
+.review-decision-actions button:disabled { opacity: .55; cursor: not-allowed; }
+@media(max-width: 650px) { .deposit-review-card { padding: 12px; } .review-event-meta { align-items: flex-start; flex-direction: column; gap: 4px; } .review-decision-actions { align-items: stretch; } .review-decision-actions .button { flex: 1 1 100%; justify-content: center; } }
