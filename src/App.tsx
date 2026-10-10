@@ -841,7 +841,7 @@ function AdminDashboard({ active }: { active: string }) {
 
   return <>
     <SectionHeading eyebrow="PLATFORM ADMINISTRATION" title={active === 'Overview' ? 'Operations overview.' : active} description="Protected, read-only operational data from the authenticated platform API." />
-    <div className="preview-warning"><ShieldCheck size={19} /><div><strong>Read-only administration</strong><p>{data?.message ?? 'No financial execution, ledger posting, payouts, or provider settlement actions are exposed in this dashboard.'}</p></div></div>
+    <div className="preview-warning"><ShieldCheck size={19} /><div><strong>Protected administration</strong><p>{data?.message ?? 'Financial execution, ledger posting, payouts, and provider settlement remain disabled. Security policy changes require a dedicated permission and are audited.'}</p></div></div>
     {active === 'Settings' && <SecuritySettingsPanel />}
     {loading ? <section className="panel"><EmptyPanel icon={Activity} title="Loading protected data" body="Checking your platform permissions and retrieving current operational counts." /></section>
       : error ? <section className="panel"><EmptyPanel icon={ShieldCheck} title="Admin data unavailable" body={error} /></section>
