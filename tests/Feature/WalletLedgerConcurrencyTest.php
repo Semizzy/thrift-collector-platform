@@ -81,13 +81,12 @@ final class WalletLedgerConcurrencyTest extends TestCase
         self::assertSame(3000, app(WalletLedgerService::class)->balance($this->businessId, $this->userId, 'NGN'));
         self::assertSame(1, DB::table('wallet_ledger_transactions')
             ->where('business_id', $this->businessId)->where('idempotency_key', 'payout:990201:wallet-debit')->count());
+        $walletAccountId = DB::table('wallet_accounts')->where('business_id', $this->businessId)
+            ->where('account_key', 'wallet:'.$this->userId.':NGN')->value('id');
         self::assertSame(1, DB::table('wallet_ledger_entries as e')
             ->join('wallet_ledger_transactions as t', 't.id', '=', 'e.wallet_ledger_transaction_id')
             ->where('t.business_id', $this->businessId)->where('t.idempotency_key', 'payout:990201:wallet-debit')
-            ->where('e.direction', 'debit')->where('e.wallet_account_id', function ($query): void {
-                $query->select('id')->from('wallet_accounts')->where('business_id', $this->businessId)
-                    ->where('account_key', 'wallet:'.$this->userId.':NGN')->limit(1);
-            })->count());
+            ->where('e.direction', 'debit')->where('e.wallet_account_id', $walletAccountId)->count());
 
         $this->assertEveryJournalBalances();
     }
