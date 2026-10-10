@@ -22,8 +22,11 @@ class ContributionRecordController extends Controller
             ->whereHas('memberships', fn ($query) => $query->where('user_id', $request->user()->id)->where('status', 'active'))
             ->firstOrFail();
 
-        $records = $group->contributions()->with('contributor:id,name,email')
-            ->orderByDesc('created_at')->paginate(25);
+        $records = $group->contributions()->with('contributor:id,name')
+            ->orderByDesc('created_at')->paginate(25, [
+                'id', 'thrift_group_id', 'user_id', 'recorded_by_user_id', 'amount_minor', 'currency_code',
+                'status', 'collection_method', 'reference', 'confirmed_by_user_id', 'confirmed_at', 'created_at',
+            ]);
 
         return response()->json(['data' => $records]);
     }
