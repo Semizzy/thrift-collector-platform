@@ -12,6 +12,7 @@ enum BusinessPermission: string
     case ConfirmCollections = 'collections.confirm';
     case ViewReports = 'reports.view';
     case ReviewDisputes = 'disputes.review';
+    case ManageReconciliation = 'reconciliation.manage';
 
     /** @return list<string> */
     public static function forRole(string $role): array
@@ -22,11 +23,11 @@ enum BusinessPermission: string
                 self::ViewMembers->value, self::ManageMembers->value,
                 self::ViewArrangements->value, self::ManageArrangements->value,
                 self::RecordContributions->value, self::ConfirmCollections->value,
-                self::ViewReports->value, self::ReviewDisputes->value,
+                self::ViewReports->value, self::ReviewDisputes->value, self::ManageReconciliation->value,
             ],
             'field_agent' => [self::ViewMembers->value, self::ViewArrangements->value, self::RecordContributions->value],
             'group_organizer' => [self::ViewMembers->value, self::ViewArrangements->value, self::ViewReports->value],
-            'auditor' => [self::ViewMembers->value, self::ViewArrangements->value, self::ViewReports->value, self::ReviewDisputes->value],
+            'auditor' => [self::ViewMembers->value, self::ViewArrangements->value, self::ViewReports->value, self::ReviewDisputes->value, self::ManageReconciliation->value],
             'contributor' => [self::ViewArrangements->value],
             default => [],
         };
