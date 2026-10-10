@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import {
   Activity, ArrowDownLeft, ArrowRight, Bell, CalendarClock, CheckCircle2,
-  ChevronDown, CircleHelp, ClipboardCheck, CreditCard, FileText, Home,
+  ChevronDown, CircleHelp, ClipboardCheck, FileText, Home,
   LayoutDashboard, LogOut, Menu, Moon, Search, Settings, ShieldCheck,
   Sun, Users, Wallet, X, type LucideIcon,
 } from 'lucide-react';
