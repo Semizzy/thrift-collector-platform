@@ -188,6 +188,8 @@ class PaystackWebhookController extends Controller
         $query = ProviderDepositEvent::query()->where('business_id', $business->id)->with('account');
         if ($request->filled('status')) {
             $query->where('status', $request->input('status'));
+        } else {
+            $query->whereNull('reviewed_at');
         }
         return response()->json(['data' => $query->orderByDesc('created_at')->paginate(25)]);
     }
