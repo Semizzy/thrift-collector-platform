@@ -7,6 +7,7 @@ use App\Models\BusinessAuditEvent;
 use App\Models\ContributionCycle;
 use App\Models\ContributionSchedule;
 use App\Models\ThriftGroup;
+use App\Models\ThriftGroupMembership;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -91,8 +92,9 @@ class ContributionScheduleController extends Controller
         $scheduleEnd = $schedule->ends_on ? CarbonImmutable::parse($schedule->ends_on->toDateString()) : null;
         $created = 0;
         $existing = 0;
+        $obligationsCreated = 0;
 
-        DB::transaction(function () use ($request, $business, $schedule, $from, $through, $scheduleStart, $scheduleEnd, &$created, &$existing): void {
+        DB::transaction(function () use ($request, $business, $schedule, $from, $through, $scheduleStart, $scheduleEnd, &$created, &$existing, &$obligationsCreated): void {
             for ($date = $from; $date->lessThanOrEqualTo($through); $date = $date->addDay()) {
                 if ($date->lessThan($scheduleStart) || ($scheduleEnd && $date->greaterThan($scheduleEnd))) continue;
                 $matches = match ($schedule->frequency) {
@@ -112,17 +114,29 @@ class ContributionScheduleController extends Controller
                     'status' => 'scheduled', 'created_by_user_id' => $request->user()->id,
                 ]);
                 $cycle->wasRecentlyCreated ? $created++ : $existing++;
+                $members = ThriftGroupMembership::query()->where('thrift_group_id', $schedule->thrift_group_id)
+                    ->where('status', 'active')->get(['user_id']);
+                foreach ($members as $member) {
+                    $obligation = $cycle->obligations()->firstOrCreate([
+                        'user_id' => $member->user_id,
+                    ], [
+                        'expected_amount_minor' => $schedule->amount_minor,
+                        'currency_code' => $schedule->currency_code,
+                        'status' => 'due',
+                    ]);
+                    if ($obligation->wasRecentlyCreated) $obligationsCreated++;
+                }
             }
 
             BusinessAuditEvent::query()->create([
                 'business_id' => $business->id, 'actor_user_id' => $request->user()->id,
                 'action' => 'contribution_cycles.generated', 'subject_type' => 'contribution_schedule', 'subject_id' => $schedule->id,
-                'metadata' => ['from' => $from->toDateString(), 'through' => $through->toDateString(), 'created_count' => $created, 'existing_count' => $existing, 'note' => 'Cycle generation does not initiate collections or payments.'],
+                'metadata' => ['from' => $from->toDateString(), 'through' => $through->toDateString(), 'created_count' => $created, 'existing_count' => $existing, 'obligations_created_count' => $obligationsCreated, 'note' => 'Cycle generation does not initiate collections or payments.'],
                 'ip_address' => $request->ip(), 'user_agent' => Str::limit((string) $request->userAgent(), 500, ''), 'created_at' => now(),
             ]);
         });
 
-        return response()->json(['data' => ['created_count' => $created, 'existing_count' => $existing], 'message' => 'Cycle schedule generated. No money movement occurred.']);
+        return response()->json(['data' => ['created_count' => $created, 'existing_count' => $existing, 'obligations_created_count' => $obligationsCreated], 'message' => 'Cycle schedule and member obligations generated. No money movement occurred.']);
     }
 
     public function cycles(Request $request, int $groupId): JsonResponse
@@ -132,7 +146,7 @@ class ContributionScheduleController extends Controller
             ->whereHas('memberships', fn ($query) => $query->where('user_id', $request->user()->id)->where('status', 'active'))
             ->firstOrFail();
 
-        $query = ContributionCycle::query()->where('thrift_group_id', $group->id)->with('schedule:id,name,frequency')
+        $query = ContributionCycle::query()->where('thrift_group_id', $group->id)->with('schedule:id,name,frequency')->withCount('obligations')
             ->orderBy('due_on');
         if ($request->filled('from')) $query->whereDate('due_on', '>=', $request->validate(['from' => ['date_format:Y-m-d']])['from']);
         if ($request->filled('through')) $query->whereDate('due_on', '<=', $request->validate(['through' => ['date_format:Y-m-d']])['through']);
