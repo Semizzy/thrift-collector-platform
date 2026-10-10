@@ -76,6 +76,40 @@ final class ApiAuthenticationTest extends TestCase
             ->assertJsonPath('message', 'If an account matches that email, password reset instructions will be sent.');
     }
 
+    public function test_password_reset_changes_password_and_revokes_existing_tokens(): void
+    {
+        $user = User::query()->create([
+            'name' => 'Reset Token User',
+            'email' => 'reset-token@example.test',
+            'password' => 'a-strong-test-password',
+        ]);
+        $accessToken = str_repeat('e', 64);
+        PersonalAccessToken::query()->create([
+            'user_id' => $user->id,
+            'name' => 'test',
+            'token_hash' => hash('sha256', $accessToken),
+            'expires_at' => now()->addDay(),
+        ]);
+        $resetToken = Password::createToken($user);
+
+        $this->postJson('/api/v1/auth/password/reset', [
+            'email' => $user->email,
+            'token' => $resetToken,
+            'password' => 'another-strong-password',
+            'password_confirmation' => 'another-strong-password',
+        ])->assertOk();
+
+        self::assertTrue(Hash::check('another-strong-password', $user->fresh()->password));
+        $this->assertDatabaseMissing('personal_access_tokens', ['user_id' => $user->id]);
+    }
+
+    public function test_reset_password_page_renders(): void
+    {
+        $this->get('/reset-password?email=person%40example.test&token=sample-token')
+            ->assertOk()
+            ->assertSee('Reset your password');
+    }
+
     public function test_business_list_requires_authentication(): void
     {
         $this->getJson('/api/v1/businesses')->assertUnauthorized();
