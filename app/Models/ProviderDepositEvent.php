@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ProviderDepositEvent extends Model
 {
@@ -11,6 +12,11 @@ class ProviderDepositEvent extends Model
         'provider_reference', 'amount_minor', 'currency_code', 'status', 'payload_hash', 'safe_metadata',
         'occurred_at', 'reviewed_by_user_id', 'review_decision', 'review_reason', 'reviewed_at',
     ];
+
+    public function account(): BelongsTo
+    {
+        return $this->belongsTo(UserDepositAccount::class, 'user_deposit_account_id');
+    }
 
     protected function casts(): array
     {
