@@ -172,4 +172,61 @@ class PaystackWebhookController extends Controller
             return response()->json(['received' => true, 'duplicate' => false]);
         });
     }
+
+    public function depositsForReview(Request $request): JsonResponse
+    {
+        $business = $request->attributes->get('current_business');
+        $query = ProviderDepositEvent::query()->where('business_id', $business->id)->with('account');
+        if ($request->filled('status')) {
+            $query->where('status', $request->input('status'));
+        }
+        return response()->json(['data' => $query->orderByDesc('created_at')->paginate(25)]);
+    }
+
+    public function reviewDepositEvent(Request $request, int $eventId): JsonResponse
+    {
+        $business = $request->attributes->get('current_business');
+        $data = $request->validate([
+            'decision' => ['required', \Illuminate\Validation\Rule::in(['confirm_evidence', 'mark_conflict', 'ignore'])],
+            'reason' => ['required', 'string', 'min:8', 'max:500'],
+        ]);
+
+        return DB::transaction(function () use ($request, $business, $eventId, $data): JsonResponse {
+            $deposit = ProviderDepositEvent::query()->where('business_id', $business->id)
+                ->whereKey($eventId)->lockForUpdate()->firstOrFail();
+            if ($deposit->reviewed_at) {
+                return response()->json(['message' => 'This provider deposit event has already been reviewed. A later change requires a separately audited correction process.'], 409);
+            }
+            if ($deposit->user_id === $request->user()->id) {
+                return response()->json(['message' => 'The account holder cannot review their own provider deposit event.'], 403);
+            }
+            $status = match ($data['decision']) {
+                'confirm_evidence' => 'evidence_reconciled',
+                'mark_conflict' => 'conflict',
+                default => 'ignored',
+            };
+            $deposit->forceFill([
+                'status' => $status, 'reviewed_by_user_id' => $request->user()->id,
+                'review_decision' => $data['decision'], 'review_reason' => trim($data['reason']),
+                'reviewed_at' => now(),
+            ])->save();
+            PaymentOperationEvent::query()->create([
+                'business_id' => $business->id, 'operation_type' => 'provider_deposit_event',
+                'operation_id' => $deposit->id, 'actor_user_id' => $request->user()->id,
+                'event' => 'provider_deposit_reconciliation_'.$data['decision'],
+                'reason' => trim($data['reason']),
+                'evidence' => [
+                    'provider' => $deposit->provider, 'provider_transaction_id' => $deposit->provider_transaction_id,
+                    'amount_minor' => $deposit->amount_minor, 'currency_code' => $deposit->currency_code,
+                    'note' => 'Evidence review only; no wallet, contribution or ledger credit was posted.',
+                ],
+                'created_at' => now(),
+            ]);
+            return response()->json([
+                'data' => $deposit->fresh(),
+                'message' => 'Provider deposit evidence review recorded. No financial balance was changed.',
+            ]);
+        });
+    }
+
 }
