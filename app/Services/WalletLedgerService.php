@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\InsufficientWalletBalance;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -97,7 +98,8 @@ class WalletLedgerService
             throw new InvalidArgumentException('Every wallet journal must contain equal debits and credits.');
         }
 
-        return DB::transaction(function () use ($businessId, $currency, $sourceType, $sourceId, $idempotencyKey, $description, $lines, $actorId, $requiredWalletBalanceKey, $metadata): array {
+        try {
+            return DB::transaction(function () use ($businessId, $currency, $sourceType, $sourceId, $idempotencyKey, $description, $lines, $actorId, $requiredWalletBalanceKey, $metadata): array {
             $keys = array_values(array_unique(array_column($lines, 'key')));
             sort($keys, SORT_STRING);
             foreach ($keys as $key) {
@@ -139,13 +141,20 @@ class WalletLedgerService
                 $account = $accounts[$line['key']];
                 $normalIncrease = $line['direction'] === $line['normal'];
                 $delta = $normalIncrease ? $line['amount'] : -$line['amount'];
-                $newBalance = (int) $account->balance_minor + $delta;
-                if ($line['type'] === 'member_wallet' && $newBalance < 0) {
-                    throw new InvalidArgumentException('A member wallet cannot have a negative balance.');
+                $accountUpdate = DB::table('wallet_accounts')->where('id', $account->id);
+                if ($line['type'] === 'member_wallet' && $delta < 0) {
+                    // Keep the non-negative invariant in the UPDATE itself, not only in a prior read.
+                    // This is a final atomic guard if two withdrawals race for the same available funds.
+                    $accountUpdate->where('balance_minor', '>=', -$delta);
                 }
-                DB::table('wallet_accounts')->where('id', $account->id)->update([
-                    'balance_minor' => $newBalance, 'updated_at' => now(),
+                $updated = $accountUpdate->update([
+                    'balance_minor' => DB::raw('balance_minor + ('.(int) $delta.')'),
+                    'updated_at' => now(),
                 ]);
+                if ($updated !== 1 && $line['type'] === 'member_wallet' && $delta < 0) {
+                    throw new InsufficientWalletBalance('Insufficient wallet balance for this withdrawal.');
+                }
+                $newBalance = (int) DB::table('wallet_accounts')->where('id', $account->id)->value('balance_minor');
                 DB::table('wallet_ledger_entries')->insert([
                     'wallet_ledger_transaction_id' => $transactionId, 'wallet_account_id' => $account->id,
                     'direction' => $line['direction'], 'amount_minor' => $line['amount'],
@@ -155,7 +164,10 @@ class WalletLedgerService
             }
 
             return ['status' => 'posted', 'transaction_id' => $transactionId];
-        }, 3);
+            }, 3);
+        } catch (InsufficientWalletBalance) {
+            return ['status' => 'insufficient_balance', 'transaction_id' => null];
+        }
     }
 
     private function walletKey(int $userId, string $currency): string
