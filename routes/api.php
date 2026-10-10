@@ -86,6 +86,8 @@ Route::prefix('v1')->group(function (): void {
                 ->whereNumber('payoutId')->middleware(RequireBusinessPermission::class.':payments.manage');
             Route::post('/payments/payouts/{payoutId}/manual-payment-evidence', [PaymentWorkflowController::class, 'confirmManualPayout'])
                 ->whereNumber('payoutId')->middleware(RequireBusinessPermission::class.':payments.manage');
+            Route::post('/payments/payouts/{payoutId}/manual-payment-evidence/review', [PaymentWorkflowController::class, 'reviewManualPayoutEvidence'])
+                ->whereNumber('payoutId')->middleware(RequireBusinessPermission::class.':payments.manage');
             Route::get('/reconciliation/batches', [ReconciliationController::class, 'index'])
                 ->middleware(RequireBusinessPermission::class.':reconciliation.manage');
             Route::post('/reconciliation/batches', [ReconciliationController::class, 'store'])
