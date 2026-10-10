@@ -41,6 +41,7 @@ final class ThriftDashboardAndPlatformAdminTest extends TestCase
             'business_id' => $business->id, 'user_id' => $user->id,
             'role' => 'business_owner', 'status' => 'active', 'joined_at' => now(),
         ]);
+        $user->forceFill(['email_verified_at' => now()])->save();
         return $business;
     }
 
