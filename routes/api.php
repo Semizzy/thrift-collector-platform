@@ -3,8 +3,11 @@
 use App\Domain\Country\CountryConfiguration;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BusinessController;
+use App\Http\Controllers\Api\V1\BusinessMembershipController;
 use App\Http\Middleware\AuthenticateApiToken;
+use App\Http\Middleware\EnsureVerifiedEmail;
 use App\Http\Middleware\RequireBusinessMembership;
+use App\Http\Middleware\RequireBusinessPermission;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
@@ -24,19 +27,27 @@ Route::prefix('v1')->group(function (): void {
     Route::prefix('auth')->group(function (): void {
         Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:5,1');
         Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
+        Route::post('/password/forgot', [AuthController::class, 'forgotPassword'])->middleware('throttle:3,1');
+        Route::post('/password/reset', [AuthController::class, 'resetPassword'])->middleware('throttle:5,1');
+        Route::get('/email/verify/{id}/{hash}', [AuthController::class, 'verifyEmail'])
+            ->middleware('signed')
+            ->name('verification.verify');
 
         Route::middleware(AuthenticateApiToken::class)->group(function (): void {
             Route::get('/me', [AuthController::class, 'me']);
             Route::post('/logout', [AuthController::class, 'logout']);
+            Route::post('/email/verification-notification', [AuthController::class, 'resendVerification'])->middleware('throttle:3,1');
         });
     });
 
-    Route::middleware(AuthenticateApiToken::class)->group(function (): void {
+    Route::middleware([AuthenticateApiToken::class, EnsureVerifiedEmail::class])->group(function (): void {
         Route::get('/businesses', [BusinessController::class, 'index']);
         Route::post('/businesses', [BusinessController::class, 'store'])->middleware('throttle:10,1');
 
         Route::middleware(RequireBusinessMembership::class)->prefix('business')->group(function (): void {
             Route::get('/current', [BusinessController::class, 'current']);
+            Route::get('/members', [BusinessMembershipController::class, 'index'])
+                ->middleware(RequireBusinessPermission::class.':members.view');
         });
     });
 });
