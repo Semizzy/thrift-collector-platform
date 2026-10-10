@@ -166,6 +166,8 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   const [pinValue, setPinValue] = useState('');
   const [pinCurrent, setPinCurrent] = useState('');
   const [pinPassword, setPinPassword] = useState('');
+  const [pinOtp, setPinOtp] = useState('');
+  const [pinOtpSending, setPinOtpSending] = useState(false);
   const [pinError, setPinError] = useState('');
   const [pinMessage, setPinMessage] = useState('');
   const [pinSaving, setPinSaving] = useState(false);
@@ -348,6 +350,23 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
     return () => { cancelled = true; };
   }, [token, active]);
 
+  async function sendTransactionPinOtp() {
+    setPinError(''); setPinMessage(''); setPinOtpSending(true);
+    try {
+      const response = await fetch('/api/v1/auth/transaction-pin/challenge', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' },
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message ?? 'Could not send verification code.');
+      setPinMessage(result.message ?? 'Verification code sent to your verified email.');
+    } catch (error) {
+      setPinError(error instanceof Error ? error.message : 'Could not send verification code.');
+    } finally {
+      setPinOtpSending(false);
+    }
+  }
+
   async function saveTransactionPin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPinError(''); setPinMessage('');
@@ -357,12 +376,12 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
       const response = await fetch('/api/v1/auth/transaction-pin', {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + token, Accept: 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: pinValue, current_password: pinPassword, ...(pinConfigured ? { current_pin: pinCurrent } : {}) }),
+        body: JSON.stringify({ pin: pinValue, current_password: pinPassword, otp_code: pinOtp, ...(pinConfigured ? { current_pin: pinCurrent } : {}) }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.message ?? 'Could not save transaction PIN.');
       setPinConfigured(true); setPinSetAt(result.data?.set_at ?? new Date().toISOString());
-      setPinValue(''); setPinCurrent(''); setPinPassword('');
+      setPinValue(''); setPinCurrent(''); setPinPassword(''); setPinOtp('');
       setPinMessage(result.message ?? 'Transaction PIN saved securely.');
     } catch (error) {
       setPinError(error instanceof Error ? error.message : 'Could not save transaction PIN.');
@@ -438,11 +457,13 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
       {pinConfigured && <><label htmlFor="pin-current">Current transaction PIN</label><input id="pin-current" inputMode="numeric" autoComplete="off" type="password" pattern="[0-9]{4}" maxLength={4} required value={pinCurrent} onChange={event => setPinCurrent(event.target.value.replace(/\D/g, '').slice(0, 4))} /></>}
       <label htmlFor="pin-new">{pinConfigured ? 'New transaction PIN' : 'Create transaction PIN'}</label>
       <input id="pin-new" inputMode="numeric" autoComplete="new-password" type="password" pattern="[0-9]{4}" maxLength={4} required value={pinValue} onChange={event => setPinValue(event.target.value.replace(/\D/g, '').slice(0, 4))} />
+      <label htmlFor="pin-otp">Email verification code</label>
+      <div className="pin-otp-row"><input id="pin-otp" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required value={pinOtp} onChange={event => setPinOtp(event.target.value.replace(/\\D/g, '').slice(0, 6))} /><button className="button button-secondary" type="button" onClick={() => void sendTransactionPinOtp()} disabled={pinOtpSending}>{pinOtpSending ? 'Sending…' : 'Email me a code'}</button></div>
       <label htmlFor="pin-password">Confirm your account password</label>
       <input id="pin-password" autoComplete="current-password" type="password" required value={pinPassword} onChange={event => setPinPassword(event.target.value)} />
       <button className="button button-primary" type="submit" disabled={pinSaving}>{pinSaving ? 'Saving securely…' : pinConfigured ? 'Change transaction PIN' : 'Set transaction PIN'}</button>
     </form>
-    <p className="deposit-consent-note">Payment requests require this PIN and a transaction purpose. Five incorrect attempts trigger a 15-minute transaction lock. Choose a non-obvious PIN. PIN changes currently require password re-authentication and your existing PIN.</p>
+    <p className="deposit-consent-note">Payment requests require this PIN and a transaction purpose. Five incorrect attempts trigger a 15-minute transaction lock. Choose a non-obvious PIN. PIN setup or changes require a code sent to your verified email, password re-authentication, and your existing PIN when changing it. Codes expire after 10 minutes.</p>
   </section>;
 
   const accountOperationsPanel = <section className="panel deposit-review-panel">
