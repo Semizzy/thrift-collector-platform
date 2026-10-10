@@ -19,12 +19,12 @@ class DashboardController extends Controller
             ->where('user_id', $user->id)->where('status', 'active')
             ->with('business:id,name,country_code,status')->get();
 
-        $groupMemberships = $user->newQuery()->whereKey($user->id)->exists()
-            ? \App\Models\ThriftGroupMembership::query()->where('user_id', $user->id)->where('status', 'active')
-                ->with(['group:id,business_id,name,description,currency_code,status,created_at'])
-                ->whereHas('group', fn ($query) => $query->where('status', 'active'))
-                ->get()
-            : collect();
+        $groupMemberships = \\App\\Models\\ThriftGroupMembership::query()
+            ->where('user_id', $user->id)
+            ->where('status', 'active')
+            ->with(['group:id,business_id,name,description,currency_code,status,created_at'])
+            ->whereHas('group', fn ($query) => $query->where('status', 'active'))
+            ->get();
         $groupIds = $groupMemberships->pluck('thrift_group_id');
         $recentContributions = ContributionRecord::query()->whereIn('thrift_group_id', $groupIds)
             ->where('user_id', $user->id)->with('group:id,name,currency_code')
