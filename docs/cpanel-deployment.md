@@ -34,6 +34,16 @@ Never expose `.env`, `vendor/`, `storage/`, database dumps, logs, source-control
 11. Set a cPanel Cron Job to run Laravel's scheduler once per minute using the hosting provider's confirmed PHP CLI path, for example: `* * * * * /usr/local/bin/php /home/ACCOUNT/app/artisan schedule:run >> /dev/null 2>&1`. Replace the example path with the actual path from the host; never copy it blindly.
 12. Verify mail delivery, cron execution, log rotation, backup creation, and a restore rehearsal. Do not expose verbose exceptions to visitors.
 
+## Frontend build and deployment
+
+The React/TypeScript dashboard is compiled to `public/app/` by `npm run build`. The CI workflow checks the production build and publishes a short-lived `thrift-collector-frontend` artifact for release packaging.
+
+- Build on a trusted local machine or CI with Node.js 20 and `npm install && npm run build`; the shared host does not need to run a permanent Node process.
+- Deploy the generated `public/app/index.html` and `public/app/assets/` together with the matching Laravel code revision. Keep the `/app/` path intact because Vite emits asset URLs under `/app/`.
+- The Laravel web routes serve the SPA shell at `/`, `/dashboard`, and `/admin` when the build exists. Without a build, `/dashboard` and `/admin` return a clear HTTP 503 response instead of a blank page.
+- `/admin` is currently a static UI preview only. It has no live admin data, and platform-admin authentication/authorization is not implemented yet. Do not treat it as an operational or protected admin panel until server-side guards and permission-checked APIs are implemented and tested.
+- The frontend intentionally displays empty states and dashes until real authenticated API integrations exist. Do not replace them with fabricated financial metrics.
+
 ## Queues and scheduled jobs
 
 Prefer the database queue driver for the first shared-hosting release. If asynchronous work is introduced, confirm whether the host permits a reliable scheduled queue runner. Use bounded jobs, retries with backoff, idempotency keys, and explicit failure handling. Do not depend on Redis, RabbitMQ, Supervisor, systemd, Docker, root access, or a permanently running worker on ordinary shared hosting.
