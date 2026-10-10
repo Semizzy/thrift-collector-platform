@@ -44,10 +44,25 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/businesses', [BusinessController::class, 'index']);
         Route::post('/businesses', [BusinessController::class, 'store'])->middleware('throttle:10,1');
 
+        Route::post('/business/invitations/accept', [BusinessMembershipController::class, 'accept'])->middleware('throttle:10,1');
+
         Route::middleware(RequireBusinessMembership::class)->prefix('business')->group(function (): void {
             Route::get('/current', [BusinessController::class, 'current']);
             Route::get('/members', [BusinessMembershipController::class, 'index'])
                 ->middleware(RequireBusinessPermission::class.':members.view');
+            Route::get('/invitations', [BusinessMembershipController::class, 'invitations'])
+                ->middleware(RequireBusinessPermission::class.':members.manage');
+            Route::post('/invitations', [BusinessMembershipController::class, 'invite'])
+                ->middleware([RequireBusinessPermission::class.':members.manage', 'throttle:10,1']);
+            Route::delete('/invitations/{invitationId}', [BusinessMembershipController::class, 'revokeInvitation'])
+                ->whereNumber('invitationId')
+                ->middleware(RequireBusinessPermission::class.':members.manage');
+            Route::patch('/members/{membershipId}/role', [BusinessMembershipController::class, 'changeRole'])
+                ->whereNumber('membershipId')
+                ->middleware(RequireBusinessPermission::class.':members.manage');
+            Route::delete('/members/{membershipId}', [BusinessMembershipController::class, 'remove'])
+                ->whereNumber('membershipId')
+                ->middleware(RequireBusinessPermission::class.':members.manage');
         });
     });
 });
