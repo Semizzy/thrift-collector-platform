@@ -103,6 +103,35 @@ final class ContributionCycleAndAdjustmentTest extends TestCase
         $this->assertDatabaseHas('business_audit_events', ['action' => 'contribution_cycles.generated', 'actor_user_id' => $owner->id]);
     }
 
+    public function test_contribution_confirmation_requires_a_different_group_member_and_is_single_use(): void
+    {
+        [$owner, $reviewer, $business, $group] = $this->groupWithTwoMembers();
+        $record = ContributionRecord::query()->create([
+            'thrift_group_id' => $group->id, 'user_id' => $owner->id, 'recorded_by_user_id' => $owner->id,
+            'amount_minor' => 12500, 'currency_code' => 'NGN', 'status' => 'recorded',
+            'collection_method' => 'cash',
+        ]);
+        $ownerToken = $this->token($owner, str_repeat('j', 64));
+        $reviewerToken = $this->token($reviewer, str_repeat('k', 64));
+        $path = '/api/v1/business/groups/'.$group->id.'/contributions/'.$record->id.'/confirm';
+
+        $this->withToken($ownerToken)->withHeader('X-Business-Id', (string) $business->id)
+            ->postJson($path)->assertForbidden();
+
+        $this->withToken($reviewerToken)->withHeader('X-Business-Id', (string) $business->id)
+            ->postJson($path)->assertOk()->assertJsonPath('data.status', 'confirmed');
+
+        $this->withToken($reviewerToken)->withHeader('X-Business-Id', (string) $business->id)
+            ->postJson($path)->assertStatus(409);
+
+        $this->assertDatabaseHas('contribution_records', [
+            'id' => $record->id, 'status' => 'confirmed',
+            'confirmed_by_user_id' => $reviewer->id, 'amount_minor' => 12500,
+        ]);
+        $this->assertSame(1, BusinessAuditEvent::query()
+            ->where('action', 'contribution.confirmed')->where('subject_id', $record->id)->count());
+    }
+
     public function test_approved_reversal_request_is_audited_and_does_not_mutate_original_record(): void
     {
         [$owner, $reviewer, $business, $group] = $this->groupWithTwoMembers();
