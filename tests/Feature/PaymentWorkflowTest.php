@@ -99,6 +99,23 @@ final class PaymentWorkflowTest extends TestCase
         $this->assertDatabaseHas('payment_operation_events', ['operation_type' => 'payout', 'operation_id' => $payoutId, 'event' => 'payout_approved_manual_execution_pending']);
     }
 
+    public function test_gateway_credentials_are_encrypted_and_configuration_cannot_enable_provider(): void
+    {
+        [$owner, , $business, $tokens] = $this->fixture();
+        $this->withToken($tokens[$owner->id])->withHeader('X-Business-Id', (string) $business->id)
+            ->putJson('/api/v1/business/payments/gateways/paystack/deposit', [
+                'public_config' => ['environment' => 'sandbox'],
+                'credentials' => ['secret_key' => 'sk_test_not_real', 'webhook_secret' => 'whsec_test_not_real'],
+            ])->assertOk()->assertJsonPath('data.status', 'disabled')
+                ->assertJsonMissing(['secret_key' => 'sk_test_not_real']);
+        $this->assertDatabaseHas('payment_gateway_configs', [
+            'business_id' => $business->id, 'provider' => 'paystack', 'direction' => 'deposit', 'status' => 'disabled',
+        ]);
+        $stored = \Illuminate\Support\Facades\DB::table('payment_gateway_configs')->where('business_id', $business->id)->value('credentials_ciphertext');
+        $this->assertNotSame(json_encode(['secret_key' => 'sk_test_not_real', 'webhook_secret' => 'whsec_test_not_real']), $stored);
+        $this->assertStringNotContainsString('sk_test_not_real', $stored);
+    }
+
     public function test_gateway_provider_deposit_is_rejected_while_live_execution_is_disabled(): void
     {
         [$owner, , $business, $tokens] = $this->fixture();
