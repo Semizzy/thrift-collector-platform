@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import {
-  Activity, ArrowDownLeft, ArrowRight, Bell, CalendarClock, CheckCircle2, Copy, Landmark, Plus, RefreshCw,
+  Activity, AlertTriangle, ArrowDownLeft, ArrowRight, Bell, CalendarClock, CheckCircle2, Copy, Landmark, Plus, RefreshCw,
   ChevronDown, CircleHelp, ClipboardCheck, FileText, Home,
   LayoutDashboard, LogOut, Menu, Moon, Search, Settings, ShieldCheck,
   Sun, Users, Wallet, X, type LucideIcon,
@@ -15,6 +15,7 @@ const userNav: NavItem[] = [
   { label: 'Contributions', icon: Wallet },
   { label: 'Bank accounts', icon: Landmark },
   { label: 'Deposit review', icon: ClipboardCheck },
+  { label: 'Account operations', icon: AlertTriangle },
   { label: 'Statements', icon: FileText },
   { label: 'Support & disputes', icon: CircleHelp },
 ];
@@ -58,7 +59,7 @@ export default function App() {
     setMenuOpen(false);
   }
 
-  const items = page === 'admin' ? adminNav : userNav.filter(item => item.label !== 'Deposit review' || canReviewDeposits);
+  const items = page === 'admin' ? adminNav : userNav.filter(item => (!['Deposit review', 'Account operations'].includes(item.label) || canReviewDeposits));
 
   return (
     <div className="app-frame">
@@ -123,6 +124,7 @@ function EmptyPanel({ icon: Icon, title, body }: { icon: LucideIcon; title: stri
 type DashboardProfile = { id: number; name: string; email: string; email_verified_at: string | null };
 type DepositAccount = { id: number; provider: string; bank_code: string; bank_name: string; account_number: string | null; account_name: string | null; currency_code: string; status: string; assigned_at: string | null };
 type DepositBank = { code: string; name: string; provider: string; currency_code: string };
+type PendingAccountDiagnostic = { id: number; bank_name: string; bank_code: string; currency_code: string; status: string; created_at: string | null; age_minutes: number; recovery_attempts: number; last_recovery_at: string | null; last_recovery_result: string | null; has_provider_customer_reference: boolean; has_provider_account_reference: boolean; diagnostic_code: string; recommended_action: string; escalation: { id: number; status: string; created_at: string } | null };
 type ProviderDeposit = { id: number; provider: string; provider_transaction_id: string; provider_reference: string | null; amount_minor: number; currency_code: string; status: string; occurred_at: string | null; created_at: string; user_id: number | null; account?: { bank_name?: string; account_name_ciphertext?: string | null } | null; safe_metadata?: { channel?: string; account_matched?: boolean } | null };
 type DashboardSummary = { user: DashboardProfile; active_workspaces_count: number; workspaces: Array<{ id: number; name: string; country_code: string; status: string; role: string }>; active_groups_count: number; groups: Array<{ id: number; business_id: number; name: string; description: string | null; currency_code: string; status: string; role: string; joined_at: string | null }>; confirmed_contribution_totals: Array<{ currency_code: string; total_minor: number; records_count: number }>; recent_contributions: Array<{ id: number; thrift_group_id: number; user_id: number; amount_minor: number; currency_code: string; status: string; collection_method: string; reference: string | null; created_at: string; confirmed_at: string | null; group: { id: number; name: string; currency_code: string } | null }>; upcoming_obligations_count: number; upcoming_obligations: Array<{ id: number; status: string; expected_amount_minor: number; currency_code: string; due_on: string | null; group: { id: number; name: string } | null }>; financial_data_status: string; message: string };
 
@@ -151,6 +153,13 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   const [reviewReason, setReviewReason] = useState('');
   const [reviewingDepositId, setReviewingDepositId] = useState<number | null>(null);
   const [reviewRefreshKey, setReviewRefreshKey] = useState(0);
+  const [pendingDiagnostics, setPendingDiagnostics] = useState<PendingAccountDiagnostic[]>([]);
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
+  const [diagnosticsError, setDiagnosticsError] = useState('');
+  const [diagnosticsMessage, setDiagnosticsMessage] = useState('');
+  const [escalationReason, setEscalationReason] = useState('');
+  const [escalatingAccountId, setEscalatingAccountId] = useState<number | null>(null);
+  const [diagnosticsRefreshKey, setDiagnosticsRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!token) { setAuthLoading(false); setProfile(null); setDashboardData(null); return; }
@@ -224,6 +233,46 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
       .finally(() => { if (!cancelled) setReviewLoading(false); });
     return () => { cancelled = true; };
   }, [token, selectedBusinessId, active, reviewRefreshKey]);
+
+  useEffect(() => {
+    if (!token || !selectedBusinessId || active !== 'Account operations') return;
+    let cancelled = false;
+    setDiagnosticsLoading(true); setDiagnosticsError('');
+    fetch('/api/v1/business/payments/deposit-accounts/operations', {
+      headers: { Authorization: 'Bearer ' + token, Accept: 'application/json', 'X-Business-Id': selectedBusinessId },
+    }).then(async response => {
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message ?? 'Could not load pending account diagnostics.');
+      return result as { data: PendingAccountDiagnostic[] };
+    }).then(result => { if (!cancelled) setPendingDiagnostics(result.data); })
+      .catch(error => { if (!cancelled) { setPendingDiagnostics([]); setDiagnosticsError(error instanceof Error ? error.message : 'Could not load pending account diagnostics.'); } })
+      .finally(() => { if (!cancelled) setDiagnosticsLoading(false); });
+    return () => { cancelled = true; };
+  }, [token, selectedBusinessId, active, diagnosticsRefreshKey]);
+
+  async function escalatePendingAccount(accountId: number) {
+    if (!token || !selectedBusinessId || escalationReason.trim().length < 10) {
+      setDiagnosticsError('Describe the issue in at least 10 characters before escalating.');
+      return;
+    }
+    setEscalatingAccountId(accountId); setDiagnosticsError(''); setDiagnosticsMessage('');
+    try {
+      const response = await fetch('/api/v1/business/payments/deposit-accounts/' + accountId + '/escalate', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, Accept: 'application/json', 'Content-Type': 'application/json', 'X-Business-Id': selectedBusinessId },
+        body: JSON.stringify({ reason: escalationReason.trim() }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message ?? 'Could not create support escalation.');
+      setDiagnosticsMessage(result.message ?? 'Support escalation recorded.');
+      setEscalationReason('');
+      setDiagnosticsRefreshKey(value => value + 1);
+    } catch (error) {
+      setDiagnosticsError(error instanceof Error ? error.message : 'Could not create support escalation.');
+    } finally {
+      setEscalatingAccountId(null);
+    }
+  }
 
   async function reviewProviderDeposit(eventId: number, decision: 'confirm_evidence' | 'mark_conflict' | 'ignore') {
     if (!token || !selectedBusinessId || reviewReason.trim().length < 8) {
@@ -338,6 +387,27 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
     <p className="deposit-consent-note">A review records evidence status only. It does not verify final settlement or credit a member balance. The account holder cannot review their own event.</p>
   </section>;
 
+  const accountOperationsPanel = <section className="panel deposit-review-panel">
+    <div className="panel-heading"><div><h2>Pending assignment diagnostics</h2><p>Accounts pending for at least an hour or after three recovery attempts. No account numbers, names, credentials, or PIN values are shown.</p></div><button className="text-button" onClick={() => setDiagnosticsRefreshKey(value => value + 1)}><RefreshCw size={15} /> Refresh</button></div>
+    {diagnosticsError && <p className="auth-error" role="alert">{diagnosticsError}</p>}
+    {diagnosticsMessage && <p className="account-success" role="status">{diagnosticsMessage}</p>}
+    {diagnosticsLoading ? <p className="muted">Checking safe provider diagnostics…</p> : pendingDiagnostics.length ? <div className="deposit-review-list">
+      {pendingDiagnostics.map(item => <article className="deposit-review-card" key={item.id}>
+        <div className="review-event-heading"><div><strong>{item.bank_name} · Account request #{item.id}</strong><p>{item.diagnostic_code.replaceAll('_', ' ')}</p></div><span className="status-pill status-warning">{item.recovery_attempts} requery attempts</span></div>
+        <div className="review-event-meta"><strong>{Math.floor(item.age_minutes / 60)}h {item.age_minutes % 60}m pending</strong><span>Last check: {item.last_recovery_at ? new Date(item.last_recovery_at).toLocaleString() : 'Not checked yet'}</span></div>
+        <p className="muted review-event-note">Customer reference: {item.has_provider_customer_reference ? 'present' : 'missing'} · Provider account reference: {item.has_provider_account_reference ? 'present' : 'not assigned'} · Last result: {(item.last_recovery_result || 'not attempted').replaceAll('_', ' ')}</p>
+        <p className="review-event-note">{item.recommended_action}</p>
+        {item.escalation ? <p className="account-success" role="status">Escalation #{item.escalation.id} · {item.escalation.status}</p> : <div className="review-escalation-form">
+          <label className="review-reason-label">Support escalation reason
+            <textarea value={escalationReason} onChange={event => setEscalationReason(event.target.value)} minLength={10} maxLength={1000} rows={2} placeholder="Describe the pending assignment and checks already completed…" />
+          </label>
+          <button className="button button-secondary" disabled={escalatingAccountId !== null} onClick={() => void escalatePendingAccount(item.id)}>{escalatingAccountId === item.id ? 'Escalating…' : 'Escalate to support'}</button>
+        </div>}
+      </article>)}
+    </div> : <div className="deposit-empty"><CheckCircle2 size={23} /><strong>No stuck account assignments</strong><p>Accounts with repeated retries or a pending age over one hour will appear here.</p></div>}
+    <p className="deposit-consent-note">Escalation records an audited support request for the business team. It does not retry assignment, create a replacement account, verify settlement, or post financial entries.</p>
+  </section>;
+
   const depositAccountsPanel = <section className="panel deposit-accounts-panel">
     <div className="panel-heading"><div><h2>Your dedicated deposit accounts</h2><p>Keep two or more bank accounts if supported by the provider. Deposits remain pending reconciliation until independently reviewed.</p></div><button className="text-button" onClick={() => { setAccountMessage(''); setAccountError(''); setAccountLoading(true); fetch('/api/v1/business/payments/deposit-accounts', { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json', 'X-Business-Id': selectedBusinessId } }).then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.message || 'Could not refresh accounts.'); setDepositAccounts(result.data); }).catch(error => setAccountError(error instanceof Error ? error.message : 'Could not refresh accounts.')).finally(() => setAccountLoading(false)); }}><RefreshCw size={15} /> Refresh</button></div>
     {dashboardData?.workspaces.length ? <label className="business-select-label">Workspace
@@ -371,6 +441,8 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   if (active === 'Contributions' && dashboardData) return <><SectionHeading eyebrow="MEMBER WORKSPACE" title="Contributions" description="Your contribution records from groups you belong to." />{dashboardData.recent_contributions.length ? <section className="panel"><div className="panel-heading"><div><h2>Recent contribution records</h2><p>Record confirmation is not proof of bank deposit or provider settlement.</p></div></div><div className="contribution-list">{dashboardData.recent_contributions.map(record => <div className="check-row" key={record.id}><span className="check-number">{record.status === 'confirmed' ? <CheckCircle2 size={17} /> : <CalendarClock size={17} />}</span><div><strong>{record.group?.name ?? `Group #${record.thrift_group_id}`}</strong><p>{new Date(record.created_at).toLocaleDateString()} · {record.collection_method.replace('_', ' ')}</p></div><div className="contribution-amount"><strong>{new Intl.NumberFormat('en-NG', { style: 'currency', currency: record.currency_code }).format(record.amount_minor / 100)}</strong><small>{record.status}</small></div></div>)}</div></section> : <EmptyPanel icon={Wallet} title="No contribution records yet" body="Records will appear here when a permitted organizer or collector records a contribution for you." />}</>;
 
   if (active === 'Deposit review') return <><SectionHeading eyebrow="BUSINESS WORKSPACE · AUTHORIZED REVIEWERS" title="Deposit review" description="Independently review provider notifications and record an auditable evidence decision." />{providerDepositReviewPanel}</>;
+
+  if (active === 'Account operations') return <><SectionHeading eyebrow="BUSINESS WORKSPACE · AUTHORIZED OPERATIONS" title="Pending account operations" description="Diagnose repeated or long-running provider assignments and escalate them for support follow-up." />{accountOperationsPanel}</>;
 
   if (active === 'Bank accounts') return <><SectionHeading eyebrow="MEMBER WORKSPACE" title="Bank accounts" description="Manage multiple dedicated accounts for receiving deposits into your thrift workspace." />{depositAccountsPanel}</>;
 
