@@ -11,6 +11,7 @@ use App\Notifications\ApiPasswordResetNotification;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\URL;
@@ -103,6 +104,82 @@ final class ApiAuthenticationTest extends TestCase
 
         self::assertTrue(Hash::check('another-strong-password', $user->fresh()->password));
         $this->assertDatabaseMissing('personal_access_tokens', ['user_id' => $user->id]);
+    }
+
+    public function test_three_failed_logins_lock_account_until_password_reset_and_admin_configured_timeout(): void
+    {
+        // This test verifies account lockout, not the independent per-IP HTTP throttle.
+        $this->withoutMiddleware(\Illuminate\Routing\Middleware\ThrottleRequests::class);
+
+        $user = User::query()->create([
+            'name' => 'Lockout User',
+            'email' => 'lockout@example.test',
+            'password' => 'a-strong-test-password',
+        ]);
+        DB::table('platform_settings')->updateOrInsert(
+            ['key' => 'login_lockout_hours'],
+            ['value' => '4', 'updated_at' => now()]
+        );
+
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
+            $this->postJson('/api/v1/auth/login', ['email' => $user->email, 'password' => 'incorrect-password'])
+                ->assertUnprocessable();
+        }
+        $this->postJson('/api/v1/auth/login', ['email' => $user->email, 'password' => 'incorrect-password'])
+            ->assertStatus(423);
+        $user->refresh();
+        self::assertSame(3, (int) $user->failed_login_attempts);
+        self::assertTrue($user->login_locked_until->between(now()->addHours(3)->subMinute(), now()->addHours(4)->addMinute()));
+
+        $this->postJson('/api/v1/auth/login', ['email' => $user->email, 'password' => 'a-strong-test-password'])
+            ->assertStatus(423);
+
+        $resetToken = Password::createToken($user);
+        $this->postJson('/api/v1/auth/password/reset', [
+            'email' => $user->email,
+            'token' => $resetToken,
+            'password' => 'a-new-strong-password',
+            'password_confirmation' => 'a-new-strong-password',
+        ])->assertOk();
+
+        $user->refresh();
+        self::assertSame(0, (int) $user->failed_login_attempts);
+        self::assertNull($user->login_locked_until);
+        $this->postJson('/api/v1/auth/login', ['email' => $user->email, 'password' => 'a-new-strong-password'])
+            ->assertOk()->assertJsonPath('token_type', 'Bearer');
+    }
+
+    public function test_authorized_platform_admin_can_change_audited_login_lockout_duration(): void
+    {
+        $admin = User::query()->create([
+            'name' => 'Security Admin', 'email' => 'security-admin@example.test',
+            'password' => 'a-strong-test-password',
+        ]);
+        $admin->forceFill([
+            'platform_role' => 'admin',
+            'platform_permissions' => ['platform.security.manage'],
+        ])->save();
+        $plain = str_repeat('s', 64);
+        PersonalAccessToken::query()->create([
+            'user_id' => $admin->id, 'name' => 'security-admin-test',
+            'token_hash' => hash('sha256', $plain), 'expires_at' => now()->addDay(),
+        ]);
+
+        $this->withToken($plain)->getJson('/api/v1/admin/security-settings')
+            ->assertOk()->assertJsonPath('data.failed_login_attempt_limit', 3)
+            ->assertJsonPath('data.login_lockout_hours', 1)
+            ->assertJsonPath('data.transaction_pin_failed_attempt_limit', 3);
+
+        $this->withToken($plain)->putJson('/api/v1/admin/security-settings', [
+            'login_lockout_hours' => 6,
+            'reason' => 'Increase lockout time after credential abuse.',
+        ])->assertOk()->assertJsonPath('data.login_lockout_hours', 6);
+
+        $this->assertDatabaseHas('platform_settings', ['key' => 'login_lockout_hours', 'value' => '6']);
+        $this->assertDatabaseHas('platform_audit_events', [
+            'actor_user_id' => $admin->id,
+            'action' => 'platform.security.login_lockout_updated',
+        ]);
     }
 
     public function test_reset_password_page_renders(): void

@@ -1,6 +1,6 @@
 {
   "name": "semizzywebmaster/thrift-collector-platform",
-  "description": "Multi-tenant thrift, Ajo and Esusu collector management platform",
+  "description": "Semizzy Thrift — multi-tenant thrift, Ajo and Esusu group savings management platform",
   "type": "project",
   "license": "proprietary",
   "require": {

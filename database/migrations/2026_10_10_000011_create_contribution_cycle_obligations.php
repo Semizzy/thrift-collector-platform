@@ -16,7 +16,7 @@ return new class extends Migration {
             $table->string('status', 20)->default('due');
             $table->foreignId('contribution_record_id')->nullable()->constrained('contribution_records')->restrictOnDelete();
             $table->timestamps();
-            $table->unique(['contribution_cycle_id', 'user_id']);
+            $table->unique(['contribution_cycle_id', 'user_id'], 'cco_cycle_user_unique');
             $table->index(['user_id', 'status']);
         });
     }

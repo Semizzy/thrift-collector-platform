@@ -10,6 +10,7 @@ use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
@@ -42,12 +43,50 @@ class AuthController extends Controller
             'password' => ['required', 'string', 'max:200'],
         ]);
 
-        $user = User::query()->where('email', Str::lower(trim($data['email'])))->first();
-        if (! $user || ! Hash::check($data['password'], $user->password)) {
+        $result = DB::transaction(function () use ($data): array {
+            $user = User::query()->where('email', Str::lower(trim($data['email'])))->lockForUpdate()->first();
+            if (! $user) {
+                return ['status' => 'invalid'];
+            }
+
+            if ($user->login_locked_until && $user->login_locked_until->isFuture()) {
+                return ['status' => 'locked', 'until' => $user->login_locked_until->toIso8601String()];
+            }
+            if ($user->login_locked_until && ! $user->login_locked_until->isFuture()) {
+                $user->forceFill(['failed_login_attempts' => 0, 'login_locked_until' => null])->save();
+            }
+
+            if (! Hash::check($data['password'], $user->password)) {
+                $attempts = min(3, (int) $user->failed_login_attempts + 1);
+                $attributes = ['failed_login_attempts' => $attempts];
+                if ($attempts >= 3) {
+                    $configuredHours = (int) (DB::table('platform_settings')->where('key', 'login_lockout_hours')->value('value') ?? 1);
+                    $hours = max(1, min(720, $configuredHours));
+                    $lockedUntil = now()->addHours($hours);
+                    $attributes['login_locked_until'] = $lockedUntil;
+                }
+                $user->forceFill($attributes)->save();
+
+                return $attempts >= 3
+                    ? ['status' => 'locked', 'until' => $lockedUntil->toIso8601String()]
+                    : ['status' => 'invalid'];
+            }
+
+            $user->forceFill(['failed_login_attempts' => 0, 'login_locked_until' => null])->save();
+            return ['status' => 'ok', 'user' => $user];
+        }, 3);
+
+        if ($result['status'] === 'locked') {
+            return response()->json([
+                'message' => 'Account locked after three failed login attempts. Reset your password or wait until the lockout expires.',
+                'locked_until' => $result['until'],
+            ], 423);
+        }
+        if ($result['status'] !== 'ok') {
             throw ValidationException::withMessages(['email' => ['The supplied credentials are invalid.']]);
         }
 
-        return $this->issueToken($user, 'login', 200);
+        return $this->issueToken($result['user'], 'login', 200);
     }
 
     public function me(Request $request): JsonResponse
@@ -99,7 +138,7 @@ class AuthController extends Controller
         $status = Password::reset(
             ['email' => Str::lower(trim($data['email'])), 'token' => $data['token'], 'password' => $data['password'], 'password_confirmation' => $data['password_confirmation']],
             function (User $user, string $password): void {
-                $user->forceFill(['password' => $password])->save();
+                $user->forceFill(['password' => $password, 'failed_login_attempts' => 0, 'login_locked_until' => null])->save();
                 $user->tokens()->delete();
                 event(new PasswordReset($user));
             }

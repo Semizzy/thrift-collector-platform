@@ -39,7 +39,7 @@ jobs:
       - name: Upload cPanel-ready frontend assets
         uses: actions/upload-artifact@v4
         with:
-          name: thrift-collector-frontend
+          name: semizzy-thrift-frontend
           path: public/app/
           if-no-files-found: error
           retention-days: 14
@@ -95,10 +95,120 @@ jobs:
           QUEUE_CONNECTION: sync
           LOG_CHANNEL: stderr
 
+  mysql8-wallet-gate:
+    name: MySQL 8 wallet, withdrawal and ledger gate
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: thrift_collector_test
+          MYSQL_USER: thrift_test
+          MYSQL_PASSWORD: thrift_test_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up PHP with MySQL driver
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer:v2
+          coverage: none
+          extensions: pdo_mysql
+
+      - name: Validate Composer configuration
+        run: composer validate --no-check-publish
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Wait for MySQL and verify server version
+        run: |
+          for attempt in $(seq 1 30); do
+            if mysqladmin ping -h 127.0.0.1 -P 3306 -uthrift_test -pthrift_test_password --silent; then
+              break
+            fi
+            sleep 2
+          done
+          mysql -h 127.0.0.1 -P 3306 -uthrift_test -pthrift_test_password -Nse "SELECT VERSION()" | grep -E '^8\.0\.'
+
+      - name: Run all migrations and seed the disposable MySQL database
+        run: php artisan migrate:fresh --seed --force
+        env:
+          APP_ENV: testing
+          APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: thrift_collector_test
+          DB_USERNAME: thrift_test
+          DB_PASSWORD: thrift_test_password
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+          LOG_CHANNEL: stderr
+
+      - name: Exercise withdrawal idempotency and competing balance protection on MySQL
+        run: ./vendor/bin/phpunit --filter='withdrawal_debits_wallet_once_and_rejection_refunds_once|competing_withdrawals_cannot_spend_the_same_wallet_balance_twice|successful_withdrawal_settlement_does_not_debit_wallet_twice|confirmed_failure_after_approval_refunds_wallet_once'
+        env:
+          APP_ENV: testing
+          APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: thrift_collector_test
+          DB_USERNAME: thrift_test
+          DB_PASSWORD: thrift_test_password
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+          LOG_CHANNEL: stderr
+
+      - name: Exercise true independent-connection wallet races on MySQL
+        run: ./vendor/bin/phpunit tests/Feature/WalletLedgerConcurrencyTest.php
+        env:
+          APP_ENV: testing
+          APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: thrift_collector_test
+          DB_USERNAME: thrift_test
+          DB_PASSWORD: thrift_test_password
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+          LOG_CHANNEL: stderr
+
+      - name: Run complete PHP test suite on MySQL 8
+        run: composer test
+        env:
+          APP_ENV: testing
+          APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: thrift_collector_test
+          DB_USERNAME: thrift_test
+          DB_PASSWORD: thrift_test_password
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+          LOG_CHANNEL: stderr
+
   deployment-package:
     name: Assemble cPanel deployment package
     runs-on: ubuntu-latest
-    needs: [frontend-build, domain-tests]
+    needs: [frontend-build, domain-tests, mysql8-wallet-gate]
     steps:
       - name: Check out verified commit
         uses: actions/checkout@v4
@@ -124,7 +234,7 @@ jobs:
       - name: Download tested frontend build
         uses: actions/download-artifact@v4
         with:
-          name: thrift-collector-frontend
+          name: semizzy-thrift-frontend
           path: public/app
 
       - name: Assemble source, migrations, docs and compiled frontend
@@ -135,12 +245,12 @@ jobs:
           cp -a artisan composer.json composer.lock .env.example README.md deployment-package/
           test ! -e deployment-package/.env
           test -s deployment-package/public/app/index.html
-          zip -qr thrift-collector-deployment.zip deployment-package
+          zip -qr semizzy-thrift-deployment.zip deployment-package
 
       - name: Upload full cPanel deployment package
         uses: actions/upload-artifact@v4
         with:
-          name: thrift-collector-deployment
-          path: thrift-collector-deployment.zip
+          name: semizzy-thrift-deployment
+          path: semizzy-thrift-deployment.zip
           if-no-files-found: error
           retention-days: 14

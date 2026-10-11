@@ -1,4 +1,4 @@
-# SEMIZZY WEBMASTER — Thrift Collector Platform
+# Semizzy Thrift
 
 Multi-tenant software for daily thrift collection and rotating Ajo/Esusu groups, initially targeting Nigeria and Ghana, with web and Android clients sharing a versioned backend API.
 
@@ -101,7 +101,7 @@ For cPanel, configure Laravel's scheduler with a cron entry that runs `php /path
 
 Authorized business reviewers with `reconciliation.manage` can open **Account operations** in the member dashboard. The API lists only long-running/repeated Paystack assignments and exposes safe diagnostics (age, retry count, last result, presence—not values—of provider references, and a diagnostic code). It never returns account numbers, account names, provider credentials, or PIN data. The reviewer can record a reasoned support escalation; an account can have only one escalation record, and the action is audited. Escalation does not create another provider account or post financial entries.
 
-Members can set a four-digit transaction PIN under **Security & PIN**. PIN hashes are stored with Laravel's password hashing, never returned to clients, and five consecutive wrong transaction PIN attempts lock payment submissions for 15 minutes. Manual deposit and payout requests require both the PIN and a human-readable `purpose`, which is stored and audited. PIN changes currently require account-password reauthentication and the current PIN; email OTP verification for PIN changes is not yet integrated, so this is not the final security release gate. Keep live money movement disabled until the OTP/change-verification flow and all financial release gates are complete.
+Members can set a four-digit transaction PIN under **Security & PIN**. PIN hashes are stored with Laravel's password hashing, never returned to clients, and three consecutive wrong transaction PIN attempts lock payment submissions for 15 minutes. Manual deposit and payout requests require both the PIN and a human-readable `purpose`, which is stored and audited. PIN changes currently require account-password reauthentication and the current PIN; email OTP verification for PIN changes is not yet integrated, so this is not the final security release gate. Keep live money movement disabled until the OTP/change-verification flow and all financial release gates are complete.
 
 
 ### Member deposit and payout requests

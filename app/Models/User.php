@@ -19,7 +19,7 @@ class User extends Authenticatable implements MustVerifyEmailContract
 
     protected function casts(): array
     {
-        return ['email_verified_at' => 'datetime', 'password' => 'hashed', 'platform_permissions' => 'array', 'transaction_pin_set_at' => 'datetime', 'transaction_pin_locked_until' => 'datetime'];
+        return ['email_verified_at' => 'datetime', 'password' => 'hashed', 'platform_permissions' => 'array', 'transaction_pin_set_at' => 'datetime', 'transaction_pin_locked_until' => 'datetime', 'login_locked_until' => 'datetime'];
     }
 
     public function tokens(): HasMany
