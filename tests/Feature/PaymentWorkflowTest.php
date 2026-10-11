@@ -460,7 +460,7 @@ final class PaymentWorkflowTest extends TestCase
                 'provider' => 'manual', 'amount_minor' => 5000, 'currency_code' => 'NGN',
                 'client_reference' => 'WRONG-PIN-DEP-01', 'purpose' => 'Monthly contribution',
                 'transaction_pin' => '9999',
-            ])->assertUnprocessable()->assertJsonPath('message', 'Transaction PIN is incorrect.');
+            ])->assertUnprocessable()->assertJsonPath('message', 'Transaction PIN is incorrect. One more failed attempt will lock transactions for 15 minutes.');
 
         $this->assertDatabaseCount('deposit_intents', 0);
         $this->assertDatabaseCount('payout_requests', 0);
