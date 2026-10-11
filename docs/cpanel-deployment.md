@@ -36,7 +36,7 @@ Never expose `.env`, `vendor/`, `storage/`, database dumps, logs, source-control
 
 ## Frontend build and deployment
 
-The React/TypeScript dashboard is compiled to `public/app/` by `npm run build`. The CI workflow checks the production build and publishes a short-lived `thrift-collector-frontend` artifact for release packaging.
+The React/TypeScript dashboard is compiled to `public/app/` by `npm run build`. The CI workflow checks the production build and publishes a short-lived `semizzy-thrift-frontend` artifact for release packaging.
 
 - Build on a trusted local machine or CI with Node.js 20 and `npm install && npm run build`; the shared host does not need to run a permanent Node process.
 - Deploy the generated `public/app/index.html` and `public/app/assets/` together with the matching Laravel code revision. Keep the `/app/` path intact because Vite emits asset URLs under `/app/`.
