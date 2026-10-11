@@ -227,7 +227,7 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   const [authError, setAuthError] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authMode, setAuthMode] = useState<'login' | 'register'>(() => window.location.pathname === '/register' ? 'register' : 'login');
   const [fullName, setFullName] = useState('');
   const [passwordConfirmation, setPasswordConfirmation] = useState('');
   const [selectedBusinessId, setSelectedBusinessId] = useState('');
@@ -640,7 +640,7 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
       <button className="button button-primary auth-submit" type="submit" disabled={authLoading}>{authLoading ? (authMode === 'register' ? 'Creating account…' : 'Signing in…') : (authMode === 'register' ? 'Create account securely' : 'Sign in securely')} <ArrowRight size={16} /></button>
     </form>
     <p className="auth-footnote">{authMode === 'register' ? 'We will send an email verification link. Use an email address you can access.' : 'Your account details are loaded securely from the platform API.'}</p>
-    <p className="auth-footnote">{authMode === 'register' ? 'Already have an account? ' : 'New to Semizzy Thrift? '}<button type="button" className="text-button" onClick={() => { setAuthMode(mode => mode === 'login' ? 'register' : 'login'); setAuthError(''); setPassword(''); setPasswordConfirmation(''); }}>{authMode === 'register' ? 'Sign in' : 'Create an account'}</button></p>
+    <p className="auth-footnote">{authMode === 'register' ? 'Already have an account? ' : 'New to Semizzy Thrift? '}<button type="button" className="text-button" onClick={() => { const nextMode = authMode === 'login' ? 'register' : 'login'; window.history.pushState({}, '', nextMode === 'register' ? '/register' : '/login'); setAuthMode(nextMode); setAuthError(''); setPassword(''); setPasswordConfirmation(''); }}>{authMode === 'register' ? 'Sign in' : 'Create an account'}</button></p>
   </div></section>;
   if (authLoading && !profile) return <section className="auth-gate"><div className="auth-card"><strong>Loading your account…</strong><p>Checking your authenticated session.</p></div></section>;
   if (authError && !profile) return <section className="auth-gate"><div className="auth-card"><h1>Session needs attention</h1><p>{authError}</p><button className="button button-primary" onClick={signOut}>Return to sign in</button></div></section>;
