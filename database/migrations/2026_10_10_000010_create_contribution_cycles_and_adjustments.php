@@ -51,7 +51,7 @@ return new class extends Migration {
             $table->string('decision_note', 500)->nullable();
             $table->timestamps();
             $table->index(['thrift_group_id', 'status', 'created_at'], 'cra_group_status_created_idx');
-            $table->index(['contribution_record_id', 'created_at']);
+            $table->index(['contribution_record_id', 'created_at'], 'cra_record_created_idx');
         });
     }
 
