@@ -108,6 +108,9 @@ final class ApiAuthenticationTest extends TestCase
 
     public function test_three_failed_logins_lock_account_until_password_reset_and_admin_configured_timeout(): void
     {
+        // This test verifies account lockout, not the independent per-IP HTTP throttle.
+        $this->withoutMiddleware(\Illuminate\Routing\Middleware\ThrottleRequests::class);
+
         $user = User::query()->create([
             'name' => 'Lockout User',
             'email' => 'lockout@example.test',
