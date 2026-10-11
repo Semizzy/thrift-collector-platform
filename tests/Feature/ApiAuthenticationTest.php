@@ -44,6 +44,33 @@ final class ApiAuthenticationTest extends TestCase
         Notification::assertSentTo(User::query()->findOrFail($response->json('data.id')), VerifyEmail::class);
     }
 
+    public function test_registration_rejects_malformed_email_and_mismatched_password_confirmation(): void
+    {
+        $this->postJson('/api/v1/auth/register', [
+            'name' => 'Amina Collector',
+            'email' => 'not-an-email',
+            'password' => 'a-strong-test-password',
+            'password_confirmation' => 'a-strong-test-password',
+        ])->assertUnprocessable()->assertJsonValidationErrors(['email']);
+
+        $this->postJson('/api/v1/auth/register', [
+            'name' => 'Amina Collector',
+            'email' => 'amina@example.test',
+            'password' => 'a-strong-test-password',
+            'password_confirmation' => 'a-different-password',
+        ])->assertUnprocessable()->assertJsonValidationErrors(['password']);
+    }
+
+    public function test_registration_rejects_missing_name_and_short_password(): void
+    {
+        $this->postJson('/api/v1/auth/register', [
+            'name' => '',
+            'email' => 'amina@example.test',
+            'password' => 'short',
+            'password_confirmation' => 'short',
+        ])->assertUnprocessable()->assertJsonValidationErrors(['name', 'password']);
+    }
+
     public function test_signed_email_verification_activates_business_access(): void
     {
         $user = User::query()->create([
