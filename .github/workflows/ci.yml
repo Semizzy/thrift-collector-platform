@@ -205,6 +205,39 @@ jobs:
           QUEUE_CONNECTION: sync
           LOG_CHANNEL: stderr
 
+  publish-frontend-to-main:
+    name: Publish verified frontend assets to main
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [frontend-build, domain-tests, mysql8-wallet-gate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download verified frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: semizzy-thrift-frontend
+          path: public/app
+
+      - name: Commit generated frontend assets to main
+        run: |
+          test -s public/app/index.html
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f public/app
+          if git diff --cached --quiet; then
+            echo "Generated frontend assets already match main."
+          else
+            git commit -m "Publish verified Semizzy Thrift frontend assets"
+            git push origin HEAD:main
+          fi
+
   deployment-package:
     name: Assemble cPanel deployment package
     runs-on: ubuntu-latest
