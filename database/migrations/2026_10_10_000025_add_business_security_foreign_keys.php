@@ -49,6 +49,12 @@ return new class extends Migration {
 
     public function down(): void
     {
+        // SQLite cannot drop individual foreign keys by name. During SQLite test
+        // rollbacks, earlier migrations will remove the affected tables afterward.
+        if (Schema::getConnection()->getDriverName() === 'sqlite') {
+            return;
+        }
+
         $hasForeignKey = static function (string $tableName, string $columnName, string $referencedTable): bool {
             return collect(Schema::getForeignKeys($tableName))->contains(
                 static fn (array $foreignKey): bool =>
