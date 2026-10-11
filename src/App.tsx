@@ -40,7 +40,7 @@ export default function App() {
   const [page, setPage] = useState<Page>(getPage);
   const [dark, setDark] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [active, setActive] = useState('Overview');
+  const [active, setActive] = useState(() => new URLSearchParams(window.location.search).get('section') || 'Overview');
   const [searchOpen, setSearchOpen] = useState(false);
   const [canReviewDeposits, setCanReviewDeposits] = useState(false);
 
@@ -49,7 +49,12 @@ export default function App() {
   }, [dark]);
 
   useEffect(() => {
-    const handlePop = () => setPage(getPage());
+    const handlePop = () => {
+      const nextPage = getPage();
+      setPage(nextPage);
+      setActive(new URLSearchParams(window.location.search).get('section') || 'Overview');
+      setMenuOpen(false);
+    };
     window.addEventListener('popstate', handlePop);
     return () => window.removeEventListener('popstate', handlePop);
   }, []);
@@ -76,7 +81,7 @@ export default function App() {
         <div className="workspace-label">{page === 'admin' ? 'PLATFORM ADMIN' : 'YOUR WORKSPACE'}</div>
         <nav className="nav-list">
           {items.map(({ label, icon: Icon }) => (
-            <button key={label} className={`nav-link ${active === label ? 'nav-active' : ''}`} onClick={() => { setActive(label); setMenuOpen(false); }}>
+            <button key={label} className={`nav-link ${active === label ? 'nav-active' : ''}`} onClick={() => { setActive(label); const url = new URL(window.location.href); url.searchParams.set('section', label); window.history.pushState({}, '', url.pathname + url.search + url.hash); setMenuOpen(false); }}>
               <Icon size={19} /><span>{label}</span>{label === 'Approvals & disputes' && page === 'admin' && <span className="nav-dot" />}
             </button>
           ))}
@@ -108,7 +113,7 @@ export default function App() {
         </div>
         <nav className="mobile-tabs" aria-label="Quick navigation">
           {(page === 'admin' ? adminNav.slice(0, 4) : userNav.slice(0, 4)).map(({ label, icon: Icon }) => (
-            <button key={label} className={active === label ? 'tab-active' : ''} onClick={() => setActive(label)}><Icon size={19} /><span>{label === 'Overview' ? 'Home' : label === 'Contributions' ? 'Payments' : label === 'Statements' ? 'Reports' : label === 'Collections' ? 'Collect' : label === 'Reconciliation' ? 'Reconcile' : label === 'My groups' ? 'Groups' : label === 'Members & businesses' ? 'Members' : label}</span></button>
+            <button key={label} className={active === label ? 'tab-active' : ''} onClick={() => { setActive(label); const url = new URL(window.location.href); url.searchParams.set('section', label); window.history.pushState({}, '', url.pathname + url.search + url.hash); }}><Icon size={19} /><span>{label === 'Overview' ? 'Home' : label === 'Contributions' ? 'Payments' : label === 'Statements' ? 'Reports' : label === 'Collections' ? 'Collect' : label === 'Reconciliation' ? 'Reconcile' : label === 'My groups' ? 'Groups' : label === 'Members & businesses' ? 'Members' : label}</span></button>
           ))}
         </nav>
       </main>
@@ -585,7 +590,9 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   }
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setAuthError(''); setAuthLoading(true);
+    event.preventDefault(); setAuthError('');
+    if (!email.trim() || !password) { setAuthError('Enter your email address and password.'); return; }
+    setAuthLoading(true);
     try {
       const response = await fetch('/api/v1/auth/login', {
         method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -602,14 +609,21 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
 
   async function register(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setAuthError('');
+    const normalizedName = fullName.trim();
+    const normalizedEmail = email.trim();
+    if (normalizedName.length < 2) { setAuthError('Enter your full name (at least 2 characters).'); return; }
+    if (normalizedName.length > 120) { setAuthError('Your name must be 120 characters or fewer.'); return; }
+    if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(normalizedEmail)) { setAuthError('Enter a valid email address.'); return; }
     if (password.length < 12) { setAuthError('Use a password with at least 12 characters.'); return; }
+    if (password.length > 200) { setAuthError('Your password must be 200 characters or fewer.'); return; }
     if (password !== passwordConfirmation) { setAuthError('Your passwords do not match.'); return; }
+    setAuthLoading(true);
     setAuthLoading(true);
     try {
       const response = await fetch('/api/v1/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ name: fullName.trim(), email: email.trim(), password, password_confirmation: passwordConfirmation }),
+        body: JSON.stringify({ name: normalizedName, email: normalizedEmail, password, password_confirmation: passwordConfirmation }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.message ?? result.errors?.name?.[0] ?? result.errors?.email?.[0] ?? result.errors?.password?.[0] ?? 'Could not create your account. Check the details and try again.');
@@ -655,7 +669,7 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
         <button className="button button-primary auth-submit" type="submit" disabled={authLoading}>{authLoading ? (authMode === 'register' ? 'Creating account…' : 'Signing in…') : (authMode === 'register' ? 'Create my account' : 'Sign in securely')} <ArrowRight size={16} /></button>
       </form>
       <p className="auth-footnote">{authMode === 'register' ? 'We will send an email verification link. Use an email address you can access.' : 'Your account details are loaded securely after sign-in.'}</p>
-      <p className="auth-switch-prompt">{authMode === 'register' ? 'Already registered?' : 'New to Semizzy Thrift?'} <button type="button" className="text-button" onClick={() => { const nextMode = authMode === 'login' ? 'register' : 'login'; window.history.pushState({}, '', nextMode === 'register' ? '/register' : '/login'); setAuthMode(nextMode); setAuthError(''); setPassword(''); setPasswordConfirmation(''); }}>{authMode === 'register' ? 'Sign in instead' : 'Create an account'}</button></p>
+      <p className="auth-switch-prompt">{authMode === 'register' ? 'Already registered?' : 'New to Semizzy Thrift?'} <button type="button" className="text-button" onClick={() => { const nextMode = authMode === 'login' ? 'register' : 'login'; window.history.pushState({}, '', nextMode === 'register' ? '/register' : '/login'); setAuthMode(nextMode); setAuthError(''); setPassword(''); setPasswordConfirmation(''); setFullName(''); setEmail(''); }}>{authMode === 'register' ? 'Sign in instead' : 'Create an account'}</button></p>
     </div>
   </section>;
   if (authLoading && !profile) return <section className="auth-gate"><div className="auth-card"><strong>Loading your account…</strong><p>Checking your authenticated session.</p></div></section>;
