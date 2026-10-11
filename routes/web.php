@@ -30,6 +30,8 @@ Route::get('/', function () use ($serveDashboardApp) {
 });
 
 Route::get('/dashboard', $serveDashboardApp);
+Route::get('/login', $serveDashboardApp);
+Route::get('/register', $serveDashboardApp);
 Route::get('/admin', $serveDashboardApp);
 
 Route::view('/reset-password', 'auth.reset-password');
