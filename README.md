@@ -1,4 +1,4 @@
-# SEMIZZY WEBMASTER — Thrift Collector Platform
+# Semizzy Thrift
 
 Multi-tenant software for daily thrift collection and rotating Ajo/Esusu groups, initially targeting Nigeria and Ghana, with web and Android clients sharing a versioned backend API.
 
