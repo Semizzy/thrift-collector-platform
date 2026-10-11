@@ -158,7 +158,7 @@ jobs:
           LOG_CHANNEL: stderr
 
       - name: Exercise withdrawal idempotency and competing balance protection on MySQL
-        run: php artisan test --filter='withdrawal_debits_wallet_once_and_rejection_refunds_once|competing_withdrawals_cannot_spend_the_same_wallet_balance_twice|successful_withdrawal_settlement_does_not_debit_wallet_twice|confirmed_failure_after_approval_refunds_wallet_once'
+        run: ./vendor/bin/phpunit --filter='withdrawal_debits_wallet_once_and_rejection_refunds_once|competing_withdrawals_cannot_spend_the_same_wallet_balance_twice|successful_withdrawal_settlement_does_not_debit_wallet_twice|confirmed_failure_after_approval_refunds_wallet_once'
         env:
           APP_ENV: testing
           APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
@@ -174,7 +174,7 @@ jobs:
           LOG_CHANNEL: stderr
 
       - name: Exercise true independent-connection wallet races on MySQL
-        run: php artisan test tests/Feature/WalletLedgerConcurrencyTest.php
+        run: ./vendor/bin/phpunit tests/Feature/WalletLedgerConcurrencyTest.php
         env:
           APP_ENV: testing
           APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
