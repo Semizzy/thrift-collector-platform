@@ -627,21 +627,37 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
     sessionStorage.removeItem('tcp_access_token'); setToken(''); setProfile(null); setDashboardData(null);
   }
 
-  if (!token) return <section className="auth-gate"><div className="auth-card">
-    <div className="brand-mark auth-brand"><Wallet size={22} /></div><div className="eyebrow">MEMBER ACCESS</div>
-    <h1>{authMode === 'register' ? 'Create your account.' : 'Welcome back.'}</h1>
-    <p>{authMode === 'register' ? 'Join Semizzy Thrift to manage your savings groups and contributions.' : 'Sign in to load your account details from the authenticated platform API.'}</p>
-    <form className="auth-form" onSubmit={authMode === 'register' ? register : signIn}>
-      {authMode === 'register' && <><label htmlFor="member-name">Full name</label><input id="member-name" type="text" autoComplete="name" minLength={2} maxLength={120} required value={fullName} onChange={event => setFullName(event.target.value)} /></>}
-      <label htmlFor="member-email">Email address</label><input id="member-email" type="email" autoComplete="email" maxLength={254} required value={email} onChange={event => setEmail(event.target.value)} />
-      <label htmlFor="member-password">Password</label><input id="member-password" type="password" autoComplete={authMode === 'register' ? 'new-password' : 'current-password'} minLength={authMode === 'register' ? 12 : undefined} maxLength={200} required value={password} onChange={event => setPassword(event.target.value)} />
-      {authMode === 'register' && <><label htmlFor="member-password-confirmation">Confirm password</label><input id="member-password-confirmation" type="password" autoComplete="new-password" minLength={12} maxLength={200} required value={passwordConfirmation} onChange={event => setPasswordConfirmation(event.target.value)} /></>}
-      {authError && <p className="auth-error" role="alert">{authError}</p>}
-      <button className="button button-primary auth-submit" type="submit" disabled={authLoading}>{authLoading ? (authMode === 'register' ? 'Creating account…' : 'Signing in…') : (authMode === 'register' ? 'Create account securely' : 'Sign in securely')} <ArrowRight size={16} /></button>
-    </form>
-    <p className="auth-footnote">{authMode === 'register' ? 'We will send an email verification link. Use an email address you can access.' : 'Your account details are loaded securely from the platform API.'}</p>
-    <p className="auth-footnote">{authMode === 'register' ? 'Already have an account? ' : 'New to Semizzy Thrift? '}<button type="button" className="text-button" onClick={() => { const nextMode = authMode === 'login' ? 'register' : 'login'; window.history.pushState({}, '', nextMode === 'register' ? '/register' : '/login'); setAuthMode(nextMode); setAuthError(''); setPassword(''); setPasswordConfirmation(''); }}>{authMode === 'register' ? 'Sign in' : 'Create an account'}</button></p>
-  </div></section>;
+  if (!token) return <section className={`auth-gate ${authMode === 'register' ? 'auth-gate-register' : 'auth-gate-login'}`}>
+    <div className="auth-showcase">
+      <div className="auth-showcase-brand"><span className="brand-mark"><Wallet size={22} /></span><span>SEMIZZY <strong>THRIFT</strong></span></div>
+      {authMode === 'register' ? <>
+        <div className="eyebrow">YOUR NEXT CHAPTER STARTS HERE</div>
+        <h2>Build better saving habits, <em>together.</em></h2>
+        <p>Create your member account to join savings groups, follow contributions and keep your financial activity in one place.</p>
+        <ul className="auth-benefits"><li><span>01</span><div><strong>Stay organised</strong><small>Keep track of your groups and contributions.</small></div></li><li><span>02</span><div><strong>Know where you stand</strong><small>See account activity and payment records.</small></div></li><li><span>03</span><div><strong>Security comes first</strong><small>Use your own email and a strong password.</small></div></li></ul>
+      </> : <>
+        <div className="eyebrow">A CLEARER WAY TO SAVE</div>
+        <h2>Good to have you <em>back.</em></h2>
+        <p>Sign in to continue to your Semizzy Thrift workspace and review your savings activity.</p>
+        <div className="auth-trust-note"><ShieldCheck size={20} /><span><strong>Your account, your access.</strong><small>Never share your password or verification codes.</small></span></div>
+      </>}
+    </div>
+    <div className="auth-card">
+      <div className="eyebrow">{authMode === 'register' ? 'MEMBER REGISTRATION' : 'MEMBER ACCESS'}</div>
+      <h1>{authMode === 'register' ? 'Create your account' : 'Sign in to your account'}</h1>
+      <p>{authMode === 'register' ? 'Enter your details below to get started.' : 'Welcome back. Enter your details to sign in.'}</p>
+      <form className="auth-form" onSubmit={authMode === 'register' ? register : signIn}>
+        {authMode === 'register' && <><label htmlFor="member-name">Full name</label><input id="member-name" type="text" autoComplete="name" minLength={2} maxLength={120} required value={fullName} onChange={event => setFullName(event.target.value)} /></>}
+        <label htmlFor="member-email">Email address</label><input id="member-email" type="email" autoComplete="email" maxLength={254} required value={email} onChange={event => setEmail(event.target.value)} />
+        <label htmlFor="member-password">Password</label><input id="member-password" type="password" autoComplete={authMode === 'register' ? 'new-password' : 'current-password'} minLength={authMode === 'register' ? 12 : undefined} maxLength={200} required value={password} onChange={event => setPassword(event.target.value)} />
+        {authMode === 'register' && <><label htmlFor="member-password-confirmation">Confirm password</label><input id="member-password-confirmation" type="password" autoComplete="new-password" minLength={12} maxLength={200} required value={passwordConfirmation} onChange={event => setPasswordConfirmation(event.target.value)} /></>}
+        {authError && <p className="auth-error" role="alert">{authError}</p>}
+        <button className="button button-primary auth-submit" type="submit" disabled={authLoading}>{authLoading ? (authMode === 'register' ? 'Creating account…' : 'Signing in…') : (authMode === 'register' ? 'Create my account' : 'Sign in securely')} <ArrowRight size={16} /></button>
+      </form>
+      <p className="auth-footnote">{authMode === 'register' ? 'We will send an email verification link. Use an email address you can access.' : 'Your account details are loaded securely after sign-in.'}</p>
+      <p className="auth-switch-prompt">{authMode === 'register' ? 'Already registered?' : 'New to Semizzy Thrift?'} <button type="button" className="text-button" onClick={() => { const nextMode = authMode === 'login' ? 'register' : 'login'; window.history.pushState({}, '', nextMode === 'register' ? '/register' : '/login'); setAuthMode(nextMode); setAuthError(''); setPassword(''); setPasswordConfirmation(''); }}>{authMode === 'register' ? 'Sign in instead' : 'Create an account'}</button></p>
+    </div>
+  </section>;
   if (authLoading && !profile) return <section className="auth-gate"><div className="auth-card"><strong>Loading your account…</strong><p>Checking your authenticated session.</p></div></section>;
   if (authError && !profile) return <section className="auth-gate"><div className="auth-card"><h1>Session needs attention</h1><p>{authError}</p><button className="button button-primary" onClick={signOut}>Return to sign in</button></div></section>;
 
