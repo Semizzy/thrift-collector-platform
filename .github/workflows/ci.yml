@@ -39,7 +39,7 @@ jobs:
       - name: Upload cPanel-ready frontend assets
         uses: actions/upload-artifact@v4
         with:
-          name: thrift-collector-frontend
+          name: semizzy-thrift-frontend
           path: public/app/
           if-no-files-found: error
           retention-days: 14
@@ -234,7 +234,7 @@ jobs:
       - name: Download tested frontend build
         uses: actions/download-artifact@v4
         with:
-          name: thrift-collector-frontend
+          name: semizzy-thrift-frontend
           path: public/app
 
       - name: Assemble source, migrations, docs and compiled frontend
@@ -245,12 +245,12 @@ jobs:
           cp -a artisan composer.json composer.lock .env.example README.md deployment-package/
           test ! -e deployment-package/.env
           test -s deployment-package/public/app/index.html
-          zip -qr thrift-collector-deployment.zip deployment-package
+          zip -qr semizzy-thrift-deployment.zip deployment-package
 
       - name: Upload full cPanel deployment package
         uses: actions/upload-artifact@v4
         with:
-          name: thrift-collector-deployment
-          path: thrift-collector-deployment.zip
+          name: semizzy-thrift-deployment
+          path: semizzy-thrift-deployment.zip
           if-no-files-found: error
           retention-days: 14
