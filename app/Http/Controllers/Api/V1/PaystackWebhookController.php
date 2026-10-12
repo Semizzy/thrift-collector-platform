@@ -73,6 +73,36 @@ class PaystackWebhookController extends Controller
                 ]
             );
             if (! $event->wasRecentlyCreated) {
+                if (! hash_equals((string) $event->payload_hash, $payloadHash)) {
+                    // The provider event identity already exists, but the signed body differs.
+                    // Preserve the original payload hash, quarantine the event, and audit the
+                    // conflict instead of silently treating a changed amount/status as a replay.
+                    $event->forceFill(['status' => 'conflict'])->save();
+                    PaymentOperationEvent::query()->create([
+                        'business_id' => $matchedBusinessId,
+                        'operation_type' => 'provider_webhook_event',
+                        'operation_id' => $event->id,
+                        'actor_user_id' => null,
+                        'event' => 'provider_webhook_conflicting_replay',
+                        'reason' => 'A signed provider webhook reused an existing event identity with a different payload hash; no settlement or balance credit was posted.',
+                        'evidence' => [
+                            'provider' => 'paystack',
+                            'event_type' => $eventType,
+                            'provider_object_id' => $objectId,
+                            'original_payload_hash' => (string) $event->payload_hash,
+                            'incoming_payload_hash' => $payloadHash,
+                        ],
+                        'created_at' => now(),
+                    ]);
+
+                    return response()->json([
+                        'received' => false,
+                        'duplicate' => false,
+                        'conflict' => true,
+                        'message' => 'Conflicting signed provider event quarantined for review.',
+                    ], 409);
+                }
+
                 return response()->json(['received' => true, 'duplicate' => true]);
             }
 
