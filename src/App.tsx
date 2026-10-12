@@ -1014,6 +1014,70 @@ function PlatformUsersPanel() {
     </section>
   </>;
 }
+type OversightRow = Record<string, unknown>;
+type OversightCategory = { label: string; rows: OversightRow[] };
+
+function PlatformOversightPanel({ title, endpoint, description }: { title: string; endpoint: string; description: string }) {
+  const [categories, setCategories] = useState<OversightCategory[]>([]);
+  const [query, setQuery] = useState('');
+  const [submittedQuery, setSubmittedQuery] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const token = sessionStorage.getItem('tcp_access_token') ?? '';
+    if (!token) { setCategories([]); setError('Sign in with an authorized platform administrator account.'); setLoading(false); return () => { cancelled = true; }; }
+    setLoading(true); setError('');
+    const params = new URLSearchParams({ per_page: '25' });
+    if (endpoint.endsWith('/businesses') && submittedQuery.trim()) params.set('q', submittedQuery.trim());
+    fetch(endpoint + '?' + params.toString(), { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } })
+      .then(async response => {
+        const payload = await response.json() as { data?: unknown; message?: string };
+        if (!response.ok) throw new Error(response.status === 403 ? 'Access denied. This account is missing the permission required for this platform oversight view.' : payload.message ?? 'Could not load platform oversight data.');
+        return payload;
+      })
+      .then(payload => {
+        const root = payload.data;
+        let next: OversightCategory[] = [];
+        if (Array.isArray(root)) next = [{ label: 'Results', rows: root as OversightRow[] }];
+        else if (root && typeof root === 'object') {
+          const record = root as Record<string, unknown>;
+          if (Array.isArray(record.data)) next = [{ label: title, rows: record.data as OversightRow[] }];
+          else next = Object.entries(record).filter((entry): entry is [string, unknown[]] => Array.isArray(entry[1])).map(([key, rows]) => ({ label: key.replaceAll('_', ' '), rows: rows as OversightRow[] }));
+        }
+        if (!cancelled) setCategories(next);
+      })
+      .catch(cause => { if (!cancelled) { setCategories([]); setError(cause instanceof Error ? cause.message : 'Could not load platform oversight data.'); } })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [endpoint, submittedQuery, reload, title]);
+
+  const displayValue = (value: unknown) => {
+    if (value === null || value === undefined || value === '') return '—';
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+    if (typeof value === 'object') return '[details withheld]';
+    return String(value);
+  };
+  const labelFor = (key: string) => key.replaceAll('_', ' ').replace(/\\b\\w/g, letter => letter.toUpperCase());
+
+  return <>
+    <SectionHeading eyebrow="PLATFORM ADMINISTRATION" title={title} description={description} />
+    <section className="panel">
+      <div className="panel-heading"><div><h2>Protected oversight records</h2><p>Read-only data. Sensitive decisions remain in existing audited workflows.</p></div><button className="text-button" type="button" onClick={() => setReload(value => value + 1)} disabled={loading}><RefreshCw size={14} /> Refresh</button></div>
+      {endpoint.endsWith('/businesses') && <form className="security-settings-form" onSubmit={event => { event.preventDefault(); setSubmittedQuery(query); }}><label htmlFor="platform-business-search">Search businesses</label><input id="platform-business-search" value={query} maxLength={100} onChange={event => setQuery(event.target.value)} placeholder="Business name or slug" /><button className="button button-primary" type="submit" disabled={loading}><Search size={16} /> Search</button></form>}
+      {error && <div className="inline-alert inline-alert-error" role="alert">{error}</div>}
+      {loading ? <EmptyPanel icon={Activity} title="Loading oversight data" body="Checking your platform permission and retrieving protected records." /> : categories.length ? categories.map(category => <div key={category.label} className="oversight-category"><div className="panel-heading"><div><h2>{labelFor(category.label)}</h2><p>{category.rows.length} record(s) returned · latest items first where applicable</p></div></div>
+        {category.rows.length ? <div className="contribution-list">{category.rows.map((row, index) => {
+          const entries = Object.entries(row).filter(([key, value]) => !['source_data', 'settings', 'credentials_ciphertext', 'destination_ciphertext', 'proof_path'].includes(key) && (value === null || ['string', 'number', 'boolean'].includes(typeof value))).slice(0, 8);
+          const primary = row.name ?? row.business_name ?? row.group_name ?? row.requester_name ?? row.member_name ?? row.client_reference ?? row.source_reference ?? row.id ?? 'Record';
+          const status = row.status ?? row.adjustment_type ?? row.provider ?? row.source;
+          return <div className="check-row" key={String(row.id ?? index)}><span className="check-number"><ClipboardCheck size={17} /></span><div className="oversight-record"><strong>{displayValue(primary)}</strong><p>{entries.slice(0, 4).filter(([key]) => !['id', 'name', 'business_name', 'group_name', 'requester_name', 'member_name', 'status'].includes(key)).map(([key, value]) => labelFor(key) + ': ' + displayValue(value)).join(' · ')}</p><p>{entries.slice(4, 8).map(([key, value]) => labelFor(key) + ': ' + displayValue(value)).join(' · ')}</p></div><div className="contribution-amount"><span className="status-pill status-neutral">{displayValue(status)}</span><small>#{displayValue(row.id)}</small></div></div>;
+        })}</div> : <EmptyPanel icon={ClipboardCheck} title="No records in this category" body="No matching records were returned for this queue." />}</div>) : <EmptyPanel icon={ShieldCheck} title="No oversight data returned" body="The API returned no categories for this view, or your account cannot access this information." />}
+    </section>
+  </>;
+}
 function AdminDashboard({ active }: { active: string }) {
   const [data, setData] = useState<AdminDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1072,9 +1136,12 @@ function AdminDashboard({ active }: { active: string }) {
       </section>}
   </>;
 
-  if (active === 'Members & businesses') return <PlatformUsersPanel />;
+  if (active === 'Members & businesses') return <><PlatformUsersPanel /><PlatformOversightPanel title="Business directory" endpoint="/api/v1/admin/businesses" description="Search businesses and review membership counts and thrift-group totals across the platform." /></>;
+  if (active === 'Collections') return <PlatformOversightPanel title="Collections" endpoint="/api/v1/admin/collections" description="Monitor contribution records, deposit intents, and payout requests across businesses. This screen cannot approve or execute payments." />;
+  if (active === 'Reconciliation') return <PlatformOversightPanel title="Reconciliation" endpoint="/api/v1/admin/reconciliation" description="Review reconciliation batches and unresolved statement exceptions across the platform. Matching and ledger posting remain in the authorized business workflow." />;
+  if (active === 'Approvals & disputes') return <PlatformOversightPanel title="Approvals & disputes" endpoint="/api/v1/admin/approvals" description="Review pending deposit evidence, payout decisions, and contribution-adjustment requests. This is an oversight queue, not a decision or payout control." />;
 
-  if (!['Overview', 'Settings'].includes(active)) return <><SectionHeading eyebrow="PLATFORM ADMINISTRATION" title={active} description="This area is available only when a matching protected platform-admin API workflow exists." /><section className="panel"><EmptyPanel icon={ShieldCheck} title={`${active} workflow is not exposed by the current platform-admin API`} body="The current API supports protected operational metrics, audit events, and security-policy settings. It does not yet expose platform-wide member management, collections, reconciliation, or approval endpoints. No mock controls or fabricated records are shown here." /></section></>;
+  if (!['Overview', 'Settings'].includes(active)) return <><SectionHeading eyebrow="PLATFORM ADMINISTRATION" title={active} description="This area is available only when a matching protected platform-admin API workflow exists." /><section className="panel"><EmptyPanel icon={ShieldCheck} title={`${active} workflow is not exposed by the current platform-admin API`} body="No mock controls or fabricated records are shown here." /></section></>;
 
   return <>
     <SectionHeading eyebrow="PLATFORM ADMINISTRATION" title={active === 'Overview' ? 'Operations overview.' : active} description="Protected, read-only operational data from the authenticated platform API." />
