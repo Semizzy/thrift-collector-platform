@@ -129,7 +129,77 @@ final class ThriftDashboardAndPlatformAdminTest extends TestCase
         ]);
     }
 
-    public function test_admin_cannot_provision_self_and_admin_without_permission_is_denied(): void
+    public function test_platform_admin_has_full_admin_module_access_without_permission_allowlists(): void
+    {
+        $actor = User::query()->create([
+            'name' => 'Full Access Administrator', 'email' => 'full-admin@example.test',
+            'password' => 'a-strong-test-password',
+        ]);
+        $actor->forceFill(['platform_role' => 'admin', 'platform_permissions' => []])->save();
+        $token = $this->tokenFor($actor, str_repeat('z', 64));
+
+        $this->withToken($token)->getJson('/api/v1/admin/dashboard')
+            ->assertOk()
+            ->assertJsonPath('data.status', 'authorized_full_access')
+            ->assertJsonPath('data.access_mode', 'full_platform_admin')
+            ->assertJsonPath('data.financial_execution_enabled', false)
+            ->assertJsonPath('data.available_modules.0', 'members');
+
+        $this->withToken($token)->getJson('/api/v1/admin/audit-events')->assertOk();
+        $this->withToken($token)->getJson('/api/v1/admin/security-settings')->assertOk();
+    }
+
+    public function test_platform_admin_can_manage_business_modules_without_membership_and_access_is_audited(): void
+    {
+        $this->seed();
+        $actor = User::query()->create([
+            'name' => 'Cross-Business Administrator', 'email' => 'cross-business-admin@example.test',
+            'password' => 'a-strong-test-password', 'email_verified_at' => now(),
+        ]);
+        $actor->forceFill(['platform_role' => 'admin', 'platform_permissions' => [], 'email_verified_at' => now()])->save();
+        $business = Business::query()->create([
+            'name' => 'Admin Managed Business', 'slug' => 'admin-managed-business',
+            'country_code' => 'NG', 'status' => 'active', 'created_by_user_id' => $actor->id,
+        ]);
+        $group = ThriftGroup::query()->create([
+            'business_id' => $business->id, 'name' => 'Group Managed By Admin',
+            'currency_code' => 'NGN', 'status' => 'active', 'created_by_user_id' => $actor->id,
+        ]);
+        $token = $this->tokenFor($actor, str_repeat('q', 64));
+
+        $this->withToken($token)->withHeader('X-Business-Id', (string) $business->id)
+            ->getJson('/api/v1/business/payments/gateways')
+            ->assertOk()
+            ->assertJsonPath('data.0.ready_for_live_execution', false);
+
+        $this->withToken($token)->withHeader('X-Business-Id', (string) $business->id)
+            ->getJson('/api/v1/business/groups')
+            ->assertOk()->assertJsonPath('data.data.0.id', $group->id);
+        $this->withToken($token)->withHeader('X-Business-Id', (string) $business->id)
+            ->getJson('/api/v1/business/groups/'.$group->id.'/contributions')
+            ->assertOk();
+
+        $this->withToken($token)->withHeader('X-Business-Id', (string) $business->id)
+            ->putJson('/api/v1/business/payments/gateways/manual/deposit', [
+                'public_config' => ['label' => 'Admin-managed manual review'],
+            ])->assertOk()->assertJsonPath('data.status', 'disabled');
+
+        $this->assertDatabaseHas('business_audit_events', [
+            'business_id' => $business->id,
+            'actor_user_id' => $actor->id,
+            'action' => 'platform_admin.business_operation_attempted',
+        ]);
+        $this->assertDatabaseHas('payment_operation_events', [
+            'business_id' => $business->id,
+            'actor_user_id' => $actor->id,
+            'event' => 'gateway_configured_disabled',
+        ]);
+        $this->assertDatabaseMissing('business_memberships', [
+            'business_id' => $business->id, 'user_id' => $actor->id,
+        ]);
+    }
+
+    public function test_admin_cannot_provision_self_but_can_manage_other_admins_without_permission_allowlist(): void
     {
         $actor = User::query()->create([
             'name' => 'Restricted Admin', 'email' => 'restricted@example.test',
@@ -147,8 +217,12 @@ final class ThriftDashboardAndPlatformAdminTest extends TestCase
             'password' => 'a-strong-test-password',
         ]);
         $this->withToken($token)->postJson('/api/v1/admin/users/'.$target->id.'/provision', [
-            'platform_role' => 'admin', 'reason' => 'Attempt without permission.',
-        ])->assertForbidden();
-        $this->assertDatabaseMissing('platform_audit_events', ['subject_user_id' => $target->id]);
+            'platform_role' => 'admin', 'reason' => 'Full platform access granted to the approved operator.',
+        ])->assertOk();
+        $this->assertDatabaseHas('users', ['id' => $target->id, 'platform_role' => 'admin']);
+        $this->assertDatabaseHas('platform_audit_events', [
+            'actor_user_id' => $actor->id, 'subject_user_id' => $target->id,
+            'action' => 'platform_admin.provisioned',
+        ]);
     }
 }

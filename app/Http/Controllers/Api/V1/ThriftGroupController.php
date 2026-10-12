@@ -17,9 +17,11 @@ class ThriftGroupController extends Controller
     public function index(Request $request): JsonResponse
     {
         $business = $request->attributes->get('current_business');
-        $groups = ThriftGroup::query()->where('business_id', $business->id)
-            ->whereHas('memberships', fn ($query) => $query->where('user_id', $request->user()->id)->where('status', 'active'))
-            ->withCount(['memberships as active_members_count' => fn ($query) => $query->where('status', 'active')])
+        $query = ThriftGroup::query()->where('business_id', $business->id);
+        if ($request->user()->platform_role !== 'admin') {
+            $query->whereHas('memberships', fn ($members) => $members->where('user_id', $request->user()->id)->where('status', 'active'));
+        }
+        $groups = $query->withCount(['memberships as active_members_count' => fn ($members) => $members->where('status', 'active')])
             ->orderBy('name')->paginate(25);
 
         return response()->json(['data' => $groups]);

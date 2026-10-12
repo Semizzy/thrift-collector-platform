@@ -11,6 +11,7 @@ use App\Models\UserDepositAccount;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 
 class PaystackWebhookController extends Controller
 {
@@ -73,6 +74,36 @@ class PaystackWebhookController extends Controller
                 ]
             );
             if (! $event->wasRecentlyCreated) {
+                if (! hash_equals((string) $event->payload_hash, $payloadHash)) {
+                    // The provider event identity already exists, but the signed body differs.
+                    // Preserve the original payload hash, quarantine the event, and audit the
+                    // conflict instead of silently treating a changed amount/status as a replay.
+                    $event->forceFill(['status' => 'conflict'])->save();
+                    PaymentOperationEvent::query()->create([
+                        'business_id' => $matchedBusinessId,
+                        'operation_type' => 'provider_webhook_event',
+                        'operation_id' => $event->id,
+                        'actor_user_id' => null,
+                        'event' => 'provider_webhook_conflicting_replay',
+                        'reason' => 'A signed provider webhook reused an existing event identity with a different payload hash; no settlement or balance credit was posted.',
+                        'evidence' => [
+                            'provider' => 'paystack',
+                            'event_type' => $eventType,
+                            'provider_object_id' => $objectId,
+                            'original_payload_hash' => (string) $event->payload_hash,
+                            'incoming_payload_hash' => $payloadHash,
+                        ],
+                        'created_at' => now(),
+                    ]);
+
+                    return response()->json([
+                        'received' => false,
+                        'duplicate' => false,
+                        'conflict' => true,
+                        'message' => 'Conflicting signed provider event quarantined for review.',
+                    ], 409);
+                }
+
                 return response()->json(['received' => true, 'duplicate' => true]);
             }
 
@@ -180,6 +211,107 @@ class PaystackWebhookController extends Controller
             }
             return response()->json(['received' => true, 'duplicate' => false]);
         });
+    }
+
+    public function requeryDepositEvent(Request $request, int $eventId): JsonResponse
+    {
+        $business = $request->attributes->get('current_business');
+        $deposit = ProviderDepositEvent::query()->where('business_id', $business->id)
+            ->whereKey($eventId)->firstOrFail();
+
+        if ($deposit->provider !== 'paystack' || ! $deposit->provider_reference) {
+            return response()->json(['message' => 'Only Paystack deposits with a provider reference can be requeried.'], 422);
+        }
+        if (in_array($deposit->status, ['conflict', 'ignored'], true)) {
+            return response()->json(['message' => 'Conflicting or ignored evidence cannot be requeried into a settlement decision.'], 409);
+        }
+
+        $config = PaymentGatewayConfig::query()->where('business_id', $business->id)
+            ->where('provider', 'paystack')->where('direction', 'deposit')->first();
+        $credentials = $config ? json_decode((string) $config->credentials_ciphertext, true) : null;
+        $secret = is_array($credentials) ? ($credentials['secret_key'] ?? null) : null;
+        if (! is_string($secret) || $secret === '') {
+            return response()->json(['message' => 'Paystack server-side status requery is unavailable because credentials are not configured.'], 503);
+        }
+
+        try {
+            $response = Http::withToken($secret)->acceptJson()->timeout(10)
+                ->get('https://api.paystack.co/transaction/verify/'.rawurlencode($deposit->provider_reference));
+        } catch (\Throwable $exception) {
+            PaymentOperationEvent::query()->create([
+                'business_id' => $business->id, 'operation_type' => 'provider_deposit_event',
+                'operation_id' => $deposit->id, 'actor_user_id' => $request->user()->id,
+                'event' => 'provider_deposit_status_requery_failed',
+                'reason' => 'Authenticated provider status requery failed; the event remains uncredited and retryable.',
+                'evidence' => ['provider' => 'paystack', 'provider_reference_hash' => hash('sha256', $deposit->provider_reference), 'failure_class' => class_basename($exception)],
+                'created_at' => now(),
+            ]);
+            return response()->json(['message' => 'Provider status is unknown because the status query failed. No financial balance was changed.'], 503);
+        }
+
+        $body = $response->json();
+        if (! $response->successful() || ! is_array($body) || ($body['status'] ?? false) !== true || ! is_array($body['data'] ?? null)) {
+            PaymentOperationEvent::query()->create([
+                'business_id' => $business->id, 'operation_type' => 'provider_deposit_event',
+                'operation_id' => $deposit->id, 'actor_user_id' => $request->user()->id,
+                'event' => 'provider_deposit_status_requery_unknown',
+                'reason' => 'Provider status API did not return a verified transaction result; no settlement or credit was performed.',
+                'evidence' => ['provider' => 'paystack', 'provider_reference_hash' => hash('sha256', $deposit->provider_reference), 'http_status' => $response->status()],
+                'created_at' => now(),
+            ]);
+            return response()->json(['message' => 'Provider status could not be verified. No financial balance was changed.'], 502);
+        }
+
+        $providerData = $body['data'];
+        $providerStatus = (string) ($providerData['status'] ?? 'unknown');
+        $providerReference = (string) ($providerData['reference'] ?? '');
+        $providerAmount = filter_var($providerData['amount'] ?? null, FILTER_VALIDATE_INT);
+        $providerCurrency = strtoupper((string) ($providerData['currency'] ?? ''));
+        $providerId = isset($providerData['id']) ? (string) $providerData['id'] : '';
+        $matches = $providerReference === $deposit->provider_reference
+            && $providerAmount !== false && (int) $providerAmount === (int) $deposit->amount_minor
+            && $providerCurrency === $deposit->currency_code
+            && $providerId === $deposit->provider_transaction_id;
+        $conflict = ! $matches;
+        $metadata = $deposit->safe_metadata ?? [];
+        $metadata['status_requery'] = [
+            'provider' => 'paystack', 'queried_at' => now()->toISOString(),
+            'provider_status' => $providerStatus, 'matches_record' => $matches,
+            'provider_transaction_id' => $providerId !== '' ? $providerId : null,
+            'amount_minor' => $providerAmount === false ? null : (int) $providerAmount,
+            'currency_code' => $providerCurrency ?: null,
+            'provider_reference_hash' => hash('sha256', $deposit->provider_reference),
+        ];
+
+        DB::transaction(function () use ($deposit, $metadata, $conflict, $business, $request, $providerStatus, $matches): void {
+            $locked = ProviderDepositEvent::query()->where('business_id', $business->id)
+                ->whereKey($deposit->id)->lockForUpdate()->firstOrFail();
+            $locked->forceFill([
+                'safe_metadata' => $metadata,
+                'status' => $conflict ? 'conflict' : $locked->status,
+            ])->save();
+            PaymentOperationEvent::query()->create([
+                'business_id' => $business->id, 'operation_type' => 'provider_deposit_event',
+                'operation_id' => $locked->id, 'actor_user_id' => $request->user()->id,
+                'event' => $conflict ? 'provider_deposit_status_requery_conflict' : 'provider_deposit_status_requeried',
+                'reason' => $conflict
+                    ? 'Authenticated provider response did not match the recorded transaction ID, reference, amount, or currency; evidence quarantined.'
+                    : 'Authenticated provider status requery matched the recorded transaction. This is evidence only and does not settle or credit funds.',
+                'evidence' => [
+                    'provider' => 'paystack', 'provider_status' => $providerStatus,
+                    'matches_record' => $matches, 'financial_posting' => false,
+                ],
+                'created_at' => now(),
+            ]);
+        });
+
+        return response()->json([
+            'data' => ['id' => $deposit->id, 'provider_status' => $providerStatus, 'matches_record' => $matches,
+                'status' => $conflict ? 'conflict' : $deposit->status, 'financial_posting' => false],
+            'message' => $conflict
+                ? 'Provider response conflicts with recorded evidence. The event is quarantined; no financial balance was changed.'
+                : 'Authenticated provider status recorded as evidence only. Independent reconciliation and settlement approval are still required.',
+        ], $conflict ? 409 : 200);
     }
 
     public function depositsForReview(Request $request): JsonResponse

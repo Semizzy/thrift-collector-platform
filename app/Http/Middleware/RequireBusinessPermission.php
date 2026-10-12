@@ -13,6 +13,12 @@ class RequireBusinessPermission
     {
         $membership = $request->attributes->get('business_membership');
 
+        // Platform administrator access spans business-scoped modules and does not
+        // depend on an ordinary membership or a per-module permission allowlist.
+        if ($request->user()?->platform_role === 'admin') {
+            return $next($request);
+        }
+
         if (! $membership || ! BusinessPermission::allows((string) $membership->role, $permission)) {
             return response()->json(['message' => 'You do not have permission to perform this action.'], 403);
         }

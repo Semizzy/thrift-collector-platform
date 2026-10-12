@@ -10,6 +10,7 @@ use App\Models\ThriftGroupMembership;
 use App\Models\BankAccountVerification;
 use App\Models\UserDepositAccount;
 use App\Models\PaymentGatewayConfig;
+use App\Models\ProviderDepositEvent;
 use App\Models\PersonalAccessToken;
 use App\Models\User;
 use App\Services\WalletLedgerService;
@@ -291,6 +292,26 @@ final class PaymentWorkflowTest extends TestCase
         $this->call('POST', '/api/v1/webhooks/paystack', [], [], [], [
             'CONTENT_TYPE' => 'application/json', 'HTTP_X_PAYSTACK_SIGNATURE' => $signature,
         ], $raw)->assertOk();
+        // A valid signature does not make a changed payload safe when it reuses the same
+        // provider event identity. Quarantine the replay and preserve the original deposit.
+        $conflictingPayload = $payload;
+        $conflictingPayload['data']['amount'] = 260000;
+        $conflictingRaw = json_encode($conflictingPayload, JSON_THROW_ON_ERROR);
+        $conflictingSignature = hash_hmac('sha512', $conflictingRaw, $secret);
+        $this->call('POST', '/api/v1/webhooks/paystack', [], [], [], [
+            'CONTENT_TYPE' => 'application/json', 'HTTP_X_PAYSTACK_SIGNATURE' => $conflictingSignature,
+        ], $conflictingRaw)->assertStatus(409)->assertJsonPath('conflict', true);
+        $this->assertDatabaseHas('provider_webhook_events', [
+            'provider' => 'paystack', 'status' => 'conflict',
+        ]);
+        $this->assertDatabaseHas('provider_deposit_events', [
+            'provider_transaction_id' => '9001', 'amount_minor' => 250000,
+        ]);
+        $this->assertDatabaseHas('payment_operation_events', [
+            'operation_type' => 'provider_webhook_event',
+            'event' => 'provider_webhook_conflicting_replay',
+        ]);
+
         $eventId = \Illuminate\Support\Facades\DB::table('provider_deposit_events')->where('provider_transaction_id', '9001')->value('id');
         $this->assertDatabaseHas('provider_deposit_events', [
             'id' => $eventId, 'business_id' => $business->id, 'amount_minor' => 250000,
@@ -349,6 +370,62 @@ final class PaymentWorkflowTest extends TestCase
     }
 
 
+
+    public function test_authenticated_paystack_status_requery_matches_evidence_and_quarantines_conflicts_without_credit(): void
+    {
+        [$owner, $reviewer, $business, $tokens] = $this->fixture();
+        PaymentGatewayConfig::query()->create([
+            'business_id' => $business->id, 'provider' => 'paystack', 'direction' => 'deposit',
+            'status' => 'disabled', 'public_config' => ['environment' => 'test'],
+            'credentials_ciphertext' => json_encode(['secret_key' => 'sk_test_status_requery'], JSON_THROW_ON_ERROR),
+            'updated_by_user_id' => $owner->id,
+        ]);
+        $matched = ProviderDepositEvent::query()->create([
+            'business_id' => $business->id, 'user_id' => $owner->id, 'provider' => 'paystack',
+            'provider_transaction_id' => '9002', 'provider_reference' => 'PAYSTACK-VERIFY-9002',
+            'amount_minor' => 250000, 'currency_code' => 'NGN', 'status' => 'needs_review',
+            'payload_hash' => hash('sha256', 'signed-payload-9002'), 'safe_metadata' => [],
+        ]);
+        $conflict = ProviderDepositEvent::query()->create([
+            'business_id' => $business->id, 'user_id' => $owner->id, 'provider' => 'paystack',
+            'provider_transaction_id' => '9003', 'provider_reference' => 'PAYSTACK-VERIFY-9003',
+            'amount_minor' => 250000, 'currency_code' => 'NGN', 'status' => 'needs_review',
+            'payload_hash' => hash('sha256', 'signed-payload-9003'), 'safe_metadata' => [],
+        ]);
+        Http::fake([
+            'https://api.paystack.co/transaction/verify/PAYSTACK-VERIFY-9002' => Http::response([
+                'status' => true, 'data' => ['id' => 9002, 'reference' => 'PAYSTACK-VERIFY-9002',
+                    'amount' => 250000, 'currency' => 'NGN', 'status' => 'success'],
+            ], 200),
+            'https://api.paystack.co/transaction/verify/PAYSTACK-VERIFY-9003' => Http::response([
+                'status' => true, 'data' => ['id' => 9003, 'reference' => 'PAYSTACK-VERIFY-9003',
+                    'amount' => 260000, 'currency' => 'NGN', 'status' => 'success'],
+            ], 200),
+        ]);
+
+        $this->withToken($tokens[$reviewer->id])->withHeader('X-Business-Id', (string) $business->id)
+            ->postJson('/api/v1/business/payments/provider-deposits/'.$matched->id.'/requery')
+            ->assertOk()->assertJsonPath('data.matches_record', true)
+            ->assertJsonPath('data.provider_status', 'success')
+            ->assertJsonPath('data.financial_posting', false);
+        $this->assertDatabaseHas('provider_deposit_events', ['id' => $matched->id, 'status' => 'needs_review']);
+
+        $this->withToken($tokens[$reviewer->id])->withHeader('X-Business-Id', (string) $business->id)
+            ->postJson('/api/v1/business/payments/provider-deposits/'.$conflict->id.'/requery')
+            ->assertStatus(409)->assertJsonPath('data.matches_record', false);
+        $this->assertDatabaseHas('provider_deposit_events', ['id' => $conflict->id, 'status' => 'conflict']);
+        $this->assertDatabaseHas('payment_operation_events', [
+            'business_id' => $business->id, 'operation_type' => 'provider_deposit_event',
+            'operation_id' => $matched->id, 'event' => 'provider_deposit_status_requeried',
+        ]);
+        $this->assertDatabaseHas('payment_operation_events', [
+            'business_id' => $business->id, 'operation_type' => 'provider_deposit_event',
+            'operation_id' => $conflict->id, 'event' => 'provider_deposit_status_requery_conflict',
+        ]);
+        $this->assertDatabaseCount('wallet_ledger_transactions', 0);
+        Http::assertSent(fn ($request) => $request->url() === 'https://api.paystack.co/transaction/verify/PAYSTACK-VERIFY-9002'
+            && $request->hasHeader('Authorization', 'Bearer sk_test_status_requery'));
+    }
 
     public function test_provider_deposit_review_queue_is_forbidden_to_members_without_reconciliation_permission(): void
     {

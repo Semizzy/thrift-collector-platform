@@ -14,6 +14,8 @@ use App\Models\PersonalAccessToken;
 use App\Models\ThriftGroup;
 use App\Models\ThriftGroupMembership;
 use App\Models\User;
+use App\Services\WalletLedgerService;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -140,6 +142,7 @@ final class ContributionCycleAndAdjustmentTest extends TestCase
             'amount_minor' => 87500, 'currency_code' => 'NGN', 'status' => 'confirmed',
             'collection_method' => 'cash', 'confirmed_by_user_id' => $owner->id, 'confirmed_at' => now(),
         ]);
+        app(WalletLedgerService::class)->creditContribution((int) $business->id, (int) $owner->id, 'NGN', 87500, (int) $record->id, (int) $reviewer->id);
         $ownerToken = $this->token($owner, str_repeat('f', 64));
         $reviewerToken = $this->token($reviewer, str_repeat('g', 64));
 
@@ -169,14 +172,34 @@ final class ContributionCycleAndAdjustmentTest extends TestCase
                 'decision' => 'approved', 'decision_note' => 'Attempt to decide outside the group membership boundary.',
             ])->assertForbidden();
 
+        // The original contribution journal exists, but no reversal has posted before approval.
+        $this->assertDatabaseCount('wallet_ledger_transactions', 1);
+        $this->assertDatabaseCount('wallet_ledger_entries', 2);
+        $this->assertSame(87500, app(WalletLedgerService::class)->balance((int) $business->id, (int) $owner->id, 'NGN'));
         $this->withToken($reviewerToken)->withHeader('X-Business-Id', (string) $business->id)
             ->postJson('/api/v1/business/groups/'.$group->id.'/adjustments/'.$adjustment->id.'/decide', [
                 'decision' => 'approved', 'decision_note' => 'Reviewed the evidence independently and approved the request.',
             ])->assertOk();
 
+        // The approved reversal adds an inverse journal and preserves the original journal.
+        $this->assertDatabaseCount('wallet_ledger_transactions', 2);
+        $this->assertDatabaseCount('wallet_ledger_entries', 4);
+        $this->assertSame(0, app(WalletLedgerService::class)->balance((int) $business->id, (int) $owner->id, 'NGN'));
         $this->assertDatabaseHas('contribution_records', [
-            'id' => $record->id, 'status' => 'confirmed', 'amount_minor' => 87500,
+            'id' => $record->id, 'status' => 'reversed', 'amount_minor' => 87500,
         ]);
+        $this->assertDatabaseHas('wallet_ledger_transactions', [
+            'business_id' => $business->id, 'idempotency_key' => 'contribution:'.$record->id.':wallet-reversal',
+            'source_type' => 'contribution_record', 'source_id' => $record->id,
+        ]);
+        $this->assertSame(87500, (int) DB::table('wallet_ledger_entries as e')
+            ->join('wallet_ledger_transactions as t', 't.id', '=', 'e.wallet_ledger_transaction_id')
+            ->where('t.idempotency_key', 'contribution:'.$record->id.':wallet-reversal')
+            ->where('e.direction', 'debit')->sum('e.amount_minor'));
+        $this->withToken($reviewerToken)->withHeader('X-Business-Id', (string) $business->id)
+            ->postJson('/api/v1/business/groups/'.$group->id.'/adjustments/'.$adjustment->id.'/decide', [
+                'decision' => 'approved', 'decision_note' => 'Reviewed the evidence independently and approved the request.',
+            ])->assertStatus(409);
         $this->assertDatabaseHas('contribution_record_adjustments', [
             'id' => $adjustment->id, 'status' => 'approved', 'decided_by_user_id' => $reviewer->id,
         ]);
