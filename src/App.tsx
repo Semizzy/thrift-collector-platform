@@ -903,6 +903,8 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   </>;
 }
 
+type AdminAuditEvent = { id: number; action: string; actor?: { id: number; name: string; email: string } | null; subject?: { id: number; name: string; email: string } | null; metadata?: Record<string, unknown> | null; created_at: string };
+
 type AdminDashboardData = {
   administrator: { id: number; name: string; email: string };
   status: string;
@@ -922,6 +924,9 @@ function AdminDashboard({ active }: { active: string }) {
   const [data, setData] = useState<AdminDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [auditEvents, setAuditEvents] = useState<AdminAuditEvent[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -945,6 +950,35 @@ function AdminDashboard({ active }: { active: string }) {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (active !== 'Reports & audit') return;
+    let cancelled = false;
+    const token = sessionStorage.getItem('tcp_access_token') ?? '';
+    if (!token) { setAuditEvents([]); setAuditError('Sign in with an authorized platform-admin account to view audit events.'); return () => { cancelled = true; }; }
+    setAuditLoading(true); setAuditError('');
+    fetch('/api/v1/admin/audit-events', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } })
+      .then(async response => {
+        const result = await response.json() as { data?: { data?: AdminAuditEvent[] }; message?: string };
+        if (!response.ok) throw new Error(response.status === 403 ? 'This account needs the platform.audit.view permission.' : result.message ?? 'Could not load platform audit events.');
+        return result;
+      })
+      .then(result => { if (!cancelled) setAuditEvents(result.data?.data ?? []); })
+      .catch(cause => { if (!cancelled) { setAuditEvents([]); setAuditError(cause instanceof Error ? cause.message : 'Could not load platform audit events.'); } })
+      .finally(() => { if (!cancelled) setAuditLoading(false); });
+    return () => { cancelled = true; };
+  }, [active]);
+
+  if (active === 'Reports & audit') return <>
+    <SectionHeading eyebrow="PLATFORM ADMINISTRATION" title="Reports & audit" description="Audit events retrieved from the dedicated permission-protected platform audit endpoint." />
+    {auditLoading ? <section className="panel"><EmptyPanel icon={Activity} title="Loading audit events" body="Checking platform.audit.view permission and retrieving the latest events." /></section>
+      : auditError ? <section className="panel"><EmptyPanel icon={ShieldCheck} title="Audit records unavailable" body={auditError} /></section>
+      : <section className="panel"><div className="panel-heading"><div><h2>Platform audit trail</h2><p>Latest 50 events, newest first. Sensitive metadata is not expanded by default.</p></div><button className="text-button" onClick={() => { setAuditEvents([]); setAuditError(''); setAuditLoading(true); const token = sessionStorage.getItem('tcp_access_token') ?? ''; fetch('/api/v1/admin/audit-events', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } }).then(async response => { const result = await response.json() as { data?: { data?: AdminAuditEvent[] }; message?: string }; if (!response.ok) throw new Error(result.message ?? 'Could not refresh audit events.'); setAuditEvents(result.data?.data ?? []); }).catch(cause => setAuditError(cause instanceof Error ? cause.message : 'Could not refresh audit events.')).finally(() => setAuditLoading(false)); }}><RefreshCw size={14} /> Refresh</button></div>
+        {auditEvents.length ? <div className="contribution-list">{auditEvents.map(event => <div className="check-row" key={event.id}><span className="check-number"><ShieldCheck size={17} /></span><div><strong>{event.action.replaceAll('.', ' ')}</strong><p>{event.actor?.name ?? 'System/unknown actor'}{event.subject?.name ? ` · Subject: ${event.subject.name}` : ''}</p></div><div className="contribution-amount"><small>{new Date(event.created_at).toLocaleString()}</small></div></div>)}</div> : <EmptyPanel icon={Activity} title="No audit events returned" body="No events are available for this query, or the platform has not recorded any yet." />}
+      </section>}
+  </>;
+
+  if (!['Overview', 'Settings'].includes(active)) return <><SectionHeading eyebrow="PLATFORM ADMINISTRATION" title={active} description="This area is available only when a matching protected platform-admin API workflow exists." /><section className="panel"><EmptyPanel icon={ShieldCheck} title={`${active} workflow is not exposed by the current platform-admin API`} body="The current API supports protected operational metrics, audit events, and security-policy settings. It does not yet expose platform-wide member management, collections, reconciliation, or approval endpoints. No mock controls or fabricated records are shown here." /></section></>;
 
   return <>
     <SectionHeading eyebrow="PLATFORM ADMINISTRATION" title={active === 'Overview' ? 'Operations overview.' : active} description="Protected, read-only operational data from the authenticated platform API." />
