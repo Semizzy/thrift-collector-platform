@@ -961,6 +961,59 @@ type AdminDashboardData = {
   message: string;
 };
 
+type PlatformUser = { id: number; name: string; email: string; email_verified_at: string | null; platform_role: string; created_at: string };
+type PlatformUserPage = { data: PlatformUser[]; current_page: number; last_page: number; per_page: number; total: number };
+
+function PlatformUsersPanel() {
+  const [query, setQuery] = useState('');
+  const [submittedQuery, setSubmittedQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [result, setResult] = useState<PlatformUserPage | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    const token = sessionStorage.getItem('tcp_access_token') ?? '';
+    if (!token) { setError('Sign in with an authorized platform administrator account.'); setLoading(false); return () => { cancelled = true; }; }
+    setLoading(true); setError('');
+    const params = new URLSearchParams({ per_page: '25', page: String(page) });
+    if (submittedQuery.trim()) params.set('q', submittedQuery.trim());
+    fetch('/api/v1/admin/users?' + params.toString(), { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } })
+      .then(async response => {
+        const payload = await response.json() as { data?: PlatformUserPage; message?: string };
+        if (!response.ok) throw new Error(response.status === 403 ? 'This account needs the platform.users.view permission.' : payload.message ?? 'Could not load platform members.');
+        return payload;
+      })
+      .then(payload => { if (!cancelled) setResult(payload.data ?? null); })
+      .catch(cause => { if (!cancelled) { setResult(null); setError(cause instanceof Error ? cause.message : 'Could not load platform members.'); } })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [page, submittedQuery]);
+
+  function search(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setPage(1); setSubmittedQuery(query); }
+
+  return <>
+    <SectionHeading eyebrow="PLATFORM ADMINISTRATION" title="Members & businesses" description="Search the protected platform member directory. This view is read-only and never exposes credentials or private security fields." />
+    <section className="panel">
+      <form className="security-settings-form" onSubmit={search}>
+        <label htmlFor="platform-member-search">Search by name or email</label>
+        <input id="platform-member-search" value={query} maxLength={100} onChange={event => setQuery(event.target.value)} placeholder="Enter a member name or email" />
+        <button className="button button-primary" type="submit" disabled={loading}><Search size={16} /> Search members</button>
+      </form>
+      {error && <div className="inline-alert inline-alert-error" role="alert">{error}</div>}
+      {loading ? <EmptyPanel icon={Activity} title="Loading platform members" body="Checking permission and retrieving a paginated directory." /> : result ? <>
+        <div className="panel-heading"><div><h2>Platform member directory</h2><p>{result.total.toLocaleString()} matching account(s) · Page {result.current_page} of {result.last_page}</p></div><button className="text-button" onClick={() => { setPage(1); setSubmittedQuery(query); }}><RefreshCw size={14} /> Refresh</button></div>
+        {result.data.length ? <div className="contribution-list">{result.data.map(member => <div className="check-row" key={member.id}>
+          <span className="check-number"><Users size={17} /></span>
+          <div><strong>{member.name}</strong><p>{member.email} · {member.email_verified_at ? 'Email verified' : 'Email not verified'}</p><p>Joined {new Date(member.created_at).toLocaleDateString()}</p></div>
+          <div className="contribution-amount"><span className="status-pill status-neutral">{member.platform_role}</span><small>Account #{member.id}</small></div>
+        </div>)}</div> : <EmptyPanel icon={Users} title="No members found" body="Try a different name or email address." />}
+        <div className="panel-heading"><p className="muted">Directory only. Role changes, account suspension, collections and financial decisions are not performed from this screen.</p><div className="inline-actions"><button className="button button-secondary" type="button" disabled={result.current_page <= 1 || loading} onClick={() => setPage(value => Math.max(1, value - 1))}>Previous</button><button className="button button-secondary" type="button" disabled={result.current_page >= result.last_page || loading} onClick={() => setPage(value => value + 1)}>Next</button></div></div>
+      </> : null}
+    </section>
+  </>;
+}
 function AdminDashboard({ active }: { active: string }) {
   const [data, setData] = useState<AdminDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1018,6 +1071,8 @@ function AdminDashboard({ active }: { active: string }) {
         {auditEvents.length ? <div className="contribution-list">{auditEvents.map(event => <div className="check-row" key={event.id}><span className="check-number"><ShieldCheck size={17} /></span><div><strong>{event.action.replaceAll('.', ' ')}</strong><p>{event.actor?.name ?? 'System/unknown actor'}{event.subject?.name ? ` · Subject: ${event.subject.name}` : ''}</p></div><div className="contribution-amount"><small>{new Date(event.created_at).toLocaleString()}</small></div></div>)}</div> : <EmptyPanel icon={Activity} title="No audit events returned" body="No events are available for this query, or the platform has not recorded any yet." />}
       </section>}
   </>;
+
+  if (active === 'Members & businesses') return <PlatformUsersPanel />;
 
   if (!['Overview', 'Settings'].includes(active)) return <><SectionHeading eyebrow="PLATFORM ADMINISTRATION" title={active} description="This area is available only when a matching protected platform-admin API workflow exists." /><section className="panel"><EmptyPanel icon={ShieldCheck} title={`${active} workflow is not exposed by the current platform-admin API`} body="The current API supports protected operational metrics, audit events, and security-policy settings. It does not yet expose platform-wide member management, collections, reconciliation, or approval endpoints. No mock controls or fabricated records are shown here." /></section></>;
 
