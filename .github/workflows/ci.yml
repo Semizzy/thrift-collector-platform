@@ -103,6 +103,7 @@ jobs:
         image: mysql:8.0
         env:
           MYSQL_ROOT_PASSWORD: root
+          MYSQL_ROOT_HOST: '%'
           MYSQL_DATABASE: thrift_collector_test
           MYSQL_USER: thrift_test
           MYSQL_PASSWORD: thrift_test_password
