@@ -22,10 +22,10 @@ This runbook is for a **separate, non-production cPanel staging site**. Passing 
 ## 3. Select and upload the exact candidate
 
 1. Open the PR and verify the latest head SHA and that all required CI jobs passed on that exact SHA.
-2. Download the `thrift-collector-deployment` artifact from the matching workflow run. It is a wrapper archive containing `thrift-collector-deployment.zip`; extract that inner ZIP.
-3. Verify the ZIP's integrity before upload. Do not use an artifact from an earlier commit.
-4. Upload and extract the inner ZIP into the private staging application directory. Keep the previous staging artifact available for rollback.
-5. Verify `artisan`, `composer.lock`, `vendor/autoload.php`, migrations, `public/index.php`, and `public/app/index.html` exist.
+2. Download the `semizzy-thrift-deployment` artifact from the matching workflow run. It is a wrapper archive containing `semizzy-thrift-deployment.zip`; extract that inner ZIP.
+3. Verify the outer and inner ZIPs with `unzip -t` (or an equivalent archive integrity check). Do not use an artifact from an earlier commit.
+4. The inner ZIP contains the top-level directory `deployment-package/`. Extract that directory's contents into the private staging application directory; do not create an accidental nested `deployment-package/deployment-package/` layout. Keep the previous staging artifact available for rollback.
+5. Verify `artisan`, `composer.lock`, `vendor/autoload.php`, migrations, `public/index.php`, and `public/app/index.html` exist in the extracted app.
 
 ## 4. Configure staging only
 
@@ -42,8 +42,9 @@ Use the host's confirmed PHP CLI and Composer paths. Install dependencies from t
 
 ## 5. Database and application checks
 
-1. Confirm the configured database host/name/user carefully before running any migration.
-2. Take a backup of the **staging** database (even if empty), then run `php artisan migrate --force` against staging only. Never run `migrate:fresh` on any shared or production database.
+1. Confirm the configured database host/name/user carefully before running any migration; record the target database name without exposing its password.
+2. Before migration, create a timestamped SQL dump of the **staging database** (even if empty) and a timestamped archive of the current staging application files, including the current `.env` only in a separately encrypted/private backup if it must be preserved. Keep both backups outside the public web root with restrictive permissions. Record file sizes and SHA-256 checksums; confirm each archive/dump is readable. Do not include secrets in CI artifacts or public folders.
+3. Then run `php artisan migrate --force` against staging only. Never run `migrate:fresh` on any shared or production database.
 3. Run `php artisan optimize:clear`, then verify the application boots and routes register. Only enable config/route caches after the environment is correct.
 4. Check `/up`, `/api/v1/health`, the web app shell, and the static assets under `/app/`.
 5. Test with synthetic accounts only: registration, email verification, login/logout, password reset, transaction-PIN setup/lockout, role and tenant authorization, group creation, contribution recording/confirmation, reconciliation review, duplicate references, withdrawal rejection/refund idempotency, and audit events.
@@ -52,7 +53,13 @@ Use the host's confirmed PHP CLI and Composer paths. Install dependencies from t
 
 ## 6. Controlled scheduler and recovery checks
 
-After the basic staging smoke tests pass, add a staging-only cPanel Cron Job using the hosting provider's actual PHP CLI path:
+Keep scheduled tasks disabled until the smoke tests pass. After basic staging validation, first rehearse recovery in a **separate isolated restore directory and disposable restore database** that are not used by the active staging app:
+
+1. Restore the pre-migration staging SQL dump into the disposable restore database, not the active database. Verify table counts, key business records, migration table state, and referential integrity against the recorded pre-migration baseline.
+2. Extract the pre-migration file backup into a separate restore directory outside the web root. Verify the expected Laravel files and compare the recorded checksum manifest. Never overwrite the active staging tree as part of the first restore test.
+3. Record restore start/end time, commands, exit codes, checksums, database/table verification results, and any errors. Remove the disposable restore database and temporary secrets securely after the rehearsal.
+4. Rehearse rollback by switching the staging release directory/document root back to the preserved prior staging release, following the host's actual cPanel layout. If a migration is not safely reversible, restore the matching pre-migration staging backup only into the isolated test target and document the recovery procedure; do not casually restore over active data.
+5. Only after the isolated restore and rollback checks pass, consider a staging-only cron test using the hosting provider's actual PHP CLI path:
 
 ```cron
 * * * * * /absolute/path/to/php /absolute/path/to/staging/artisan schedule:run >> /absolute/path/to/staging/storage/logs/scheduler.log 2>&1
