@@ -21,7 +21,7 @@ This runbook is for a **separate, non-production cPanel staging site**. Passing 
 ## 3. Select and upload the exact candidate
 
 1. Open the PR and verify the latest head SHA and that all required CI jobs passed on that exact SHA.
-2. Download the `thrift-collector-deployment` artifact from the matching workflow run. It is a wrapper archive containing `thrift-collector-deployment.zip`; extract that inner ZIP.
+2. Download the `semizzy-thrift-deployment` artifact from the matching workflow run. GitHub downloads it as a wrapper archive containing `semizzy-thrift-deployment.zip`; extract that inner ZIP.
 3. Verify the ZIP's integrity before upload. Do not use an artifact from an earlier commit.
 4. Upload and extract the inner ZIP into the private staging application directory. Keep the previous staging artifact available for rollback.
 5. Verify `artisan`, `composer.lock`, `vendor/autoload.php`, migrations, `public/index.php`, and `public/app/index.html` exist.
