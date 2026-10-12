@@ -1,0 +1,97 @@
+name: Generate and audit reproducible dependency lockfiles
+
+on:
+  push:
+    branches:
+      - chore/reproducible-lockfiles
+    paths:
+      - 'composer.json'
+      - 'package.json'
+      - '.github/workflows/dependency-lockfiles.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dependency-lockfiles-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  lockfiles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out lockfile branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          persist-credentials: true
+
+      - name: Set up PHP and Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer:v2
+          coverage: none
+
+      - name: Resolve and validate Composer lockfile
+        run: |
+          composer update --no-install --no-interaction --prefer-dist
+          composer validate --no-check-publish --strict
+
+      - name: Install locked PHP dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Audit PHP dependencies
+        id: composer-audit
+        continue-on-error: true
+        run: composer audit --format=json > composer-audit.json
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: ''
+
+      - name: Generate npm lockfile
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Verify clean npm install
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Audit npm dependencies
+        id: npm-audit
+        continue-on-error: true
+        run: npm audit --json > npm-audit.json
+
+      - name: Upload dependency audit reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-lockfile-audit-reports
+          path: |
+            composer-audit.json
+            npm-audit.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Commit generated lockfiles and audit reports
+        if: always()
+        env:
+          COMPOSER_AUDIT_OUTCOME: ${{ steps.composer-audit.outcome }}
+          NPM_AUDIT_OUTCOME: ${{ steps.npm-audit.outcome }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add composer.lock package-lock.json
+          if [ -f composer-audit.json ]; then git add composer-audit.json; fi
+          if [ -f npm-audit.json ]; then git add npm-audit.json; fi
+          if git diff --cached --quiet; then
+            echo "No generated lockfile or audit report changes to commit."
+          else
+            git commit -m "Add reproducible dependency lockfiles and audit reports"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
+          echo "Composer audit outcome: ${COMPOSER_AUDIT_OUTCOME}"
+          echo "npm audit outcome: ${NPM_AUDIT_OUTCOME}"
