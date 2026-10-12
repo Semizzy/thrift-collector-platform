@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, integration/production-readiness-candidate]
+    branches: [main, integration/production-readiness-candidate, integration/reconcile-20261012]
   pull_request:
-    branches: [main]
+    branches: [main, integration/reconcile-20261012]
   workflow_dispatch:
 
 permissions:
