@@ -42,6 +42,45 @@ class WalletLedgerService
             ], $actorId);
     }
 
+    public function reverseContribution(int $businessId, int $userId, string $currency, int $amount, int $contributionId, ?int $actorId, string $reason): array
+    {
+        if (trim($reason) === '') {
+            throw new InvalidArgumentException('A contribution reversal requires an audited reason.');
+        }
+
+        return $this->post($businessId, $currency, 'contribution_record', $contributionId,
+            'contribution:'.$contributionId.':wallet-reversal', 'Confirmed contribution reversal: '.trim($reason),
+            [
+                ['key' => $this->walletKey($userId, $currency), 'type' => 'member_wallet', 'user_id' => $userId, 'normal' => 'credit', 'direction' => 'debit', 'amount' => $amount],
+                ['key' => $this->systemKey('contribution-clearing', $currency), 'type' => 'contribution_clearing', 'user_id' => null, 'normal' => 'debit', 'direction' => 'credit', 'amount' => $amount],
+            ], $actorId, $this->walletKey($userId, $currency), ['reversal_reason' => trim($reason)]);
+    }
+
+    public function correctContribution(int $businessId, int $userId, string $currency, int $oldAmount, int $newAmount, int $contributionId, int $adjustmentId, ?int $actorId, string $reason): array
+    {
+        if ($oldAmount < 1 || $newAmount < 1 || $oldAmount === $newAmount || trim($reason) === '') {
+            throw new InvalidArgumentException('A contribution correction requires a changed positive amount and an audited reason.');
+        }
+
+        $delta = abs($newAmount - $oldAmount);
+        $increases = $newAmount > $oldAmount;
+        $lines = $increases
+            ? [
+                ['key' => $this->systemKey('contribution-clearing', $currency), 'type' => 'contribution_clearing', 'user_id' => null, 'normal' => 'debit', 'direction' => 'debit', 'amount' => $delta],
+                ['key' => $this->walletKey($userId, $currency), 'type' => 'member_wallet', 'user_id' => $userId, 'normal' => 'credit', 'direction' => 'credit', 'amount' => $delta],
+            ]
+            : [
+                ['key' => $this->walletKey($userId, $currency), 'type' => 'member_wallet', 'user_id' => $userId, 'normal' => 'credit', 'direction' => 'debit', 'amount' => $delta],
+                ['key' => $this->systemKey('contribution-clearing', $currency), 'type' => 'contribution_clearing', 'user_id' => null, 'normal' => 'debit', 'direction' => 'credit', 'amount' => $delta],
+            ];
+
+        return $this->post($businessId, $currency, 'contribution_record', $contributionId,
+            'contribution:'.$contributionId.':wallet-correction:'.$adjustmentId,
+            'Confirmed contribution amount correction: '.trim($reason), $lines, $actorId,
+            $increases ? null : $this->walletKey($userId, $currency),
+            ['adjustment_id' => $adjustmentId, 'old_amount_minor' => $oldAmount, 'new_amount_minor' => $newAmount, 'reason' => trim($reason)]);
+    }
+
     public function debitWithdrawal(int $businessId, int $userId, string $currency, int $amount, int $payoutId, ?int $actorId): array
     {
         return $this->post($businessId, $currency, 'payout_request', $payoutId,

@@ -291,6 +291,23 @@ final class PaymentWorkflowTest extends TestCase
         $this->call('POST', '/api/v1/webhooks/paystack', [], [], [], [
             'CONTENT_TYPE' => 'application/json', 'HTTP_X_PAYSTACK_SIGNATURE' => $signature,
         ], $raw)->assertOk();
+
+        // Same provider event key with a different amount must be flagged, not silently
+        // treated as a harmless duplicate or allowed to replace the original evidence.
+        $conflictingPayload = $payload;
+        $conflictingPayload['data']['amount'] = 260000;
+        $conflictingRaw = json_encode($conflictingPayload, JSON_THROW_ON_ERROR);
+        $conflictingSignature = hash_hmac('sha512', $conflictingRaw, $secret);
+        $this->call('POST', '/api/v1/webhooks/paystack', [], [], [], [
+            'CONTENT_TYPE' => 'application/json', 'HTTP_X_PAYSTACK_SIGNATURE' => $conflictingSignature,
+        ], $conflictingRaw)->assertStatus(409)->assertJsonPath('code', 'provider_webhook_conflicting_replay');
+        $this->assertDatabaseHas('provider_deposit_events', [
+            'business_id' => $business->id, 'provider_transaction_id' => '9001', 'amount_minor' => 250000,
+        ]);
+        $this->assertDatabaseHas('provider_webhook_events', ['provider' => 'paystack', 'status' => 'conflict']);
+        $this->assertDatabaseHas('payment_operation_events', ['event' => 'provider_webhook_conflicting_replay']);
+        $this->assertDatabaseCount('wallet_ledger_transactions', 0);
+
         $eventId = \Illuminate\Support\Facades\DB::table('provider_deposit_events')->where('provider_transaction_id', '9001')->value('id');
         $this->assertDatabaseHas('provider_deposit_events', [
             'id' => $eventId, 'business_id' => $business->id, 'amount_minor' => 250000,
