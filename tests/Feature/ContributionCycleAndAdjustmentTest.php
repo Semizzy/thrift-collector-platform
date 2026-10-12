@@ -14,7 +14,9 @@ use App\Models\PersonalAccessToken;
 use App\Models\ThriftGroup;
 use App\Models\ThriftGroupMembership;
 use App\Models\User;
+use App\Services\WalletLedgerService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 final class ContributionCycleAndAdjustmentTest extends TestCase
@@ -140,6 +142,10 @@ final class ContributionCycleAndAdjustmentTest extends TestCase
             'amount_minor' => 87500, 'currency_code' => 'NGN', 'status' => 'confirmed',
             'collection_method' => 'cash', 'confirmed_by_user_id' => $owner->id, 'confirmed_at' => now(),
         ]);
+        $originalPosting = app(WalletLedgerService::class)->creditContribution(
+            (int) $business->id, (int) $owner->id, 'NGN', 87500, (int) $record->id, (int) $reviewer->id
+        );
+        $this->assertSame('posted', $originalPosting['status']);
         $ownerToken = $this->token($owner, str_repeat('f', 64));
         $reviewerToken = $this->token($reviewer, str_repeat('g', 64));
 
@@ -175,11 +181,82 @@ final class ContributionCycleAndAdjustmentTest extends TestCase
             ])->assertOk();
 
         $this->assertDatabaseHas('contribution_records', [
-            'id' => $record->id, 'status' => 'confirmed', 'amount_minor' => 87500,
+            'id' => $record->id, 'status' => 'reversed', 'amount_minor' => 87500,
         ]);
         $this->assertDatabaseHas('contribution_record_adjustments', [
             'id' => $adjustment->id, 'status' => 'approved', 'decided_by_user_id' => $reviewer->id,
         ]);
+        $this->assertSame(2, DB::table('wallet_ledger_transactions')->where('business_id', $business->id)->count());
+        $this->assertSame(4, DB::table('wallet_ledger_entries')->count());
+        $this->assertSame(0, app(WalletLedgerService::class)->balance((int) $business->id, (int) $owner->id, 'NGN'));
         $this->assertDatabaseHas('business_audit_events', ['action' => 'contribution_adjustment.approved', 'actor_user_id' => $reviewer->id]);
     }
+
+    public function test_reversal_cannot_be_approved_when_member_wallet_lacks_full_amount(): void
+    {
+        [$owner, $reviewer, $business, $group] = $this->groupWithTwoMembers();
+        $record = ContributionRecord::query()->create([
+            'thrift_group_id' => $group->id, 'user_id' => $owner->id, 'recorded_by_user_id' => $reviewer->id,
+            'amount_minor' => 87500, 'currency_code' => 'NGN', 'status' => 'confirmed',
+            'collection_method' => 'cash', 'confirmed_by_user_id' => $owner->id, 'confirmed_at' => now(),
+        ]);
+        $ownerToken = $this->token($owner, str_repeat('l', 64));
+        $reviewerToken = $this->token($reviewer, str_repeat('m', 64));
+
+        $this->withToken($ownerToken)->withHeader('X-Business-Id', (string) $business->id)
+            ->postJson('/api/v1/business/groups/'.$group->id.'/contributions/'.$record->id.'/adjustments', [
+                'adjustment_type' => 'reversal', 'reason' => 'The original collection was recorded incorrectly.',
+            ])->assertCreated();
+        $adjustment = ContributionRecordAdjustment::query()->firstOrFail();
+
+        $this->withToken($reviewerToken)->withHeader('X-Business-Id', (string) $business->id)
+            ->postJson('/api/v1/business/groups/'.$group->id.'/adjustments/'.$adjustment->id.'/decide', [
+                'decision' => 'approved', 'decision_note' => 'Evidence reviewed independently before decision.',
+            ])->assertStatus(409)->assertJsonPath('code', 'contribution_reversal_insufficient_balance');
+
+        $this->assertDatabaseHas('contribution_records', ['id' => $record->id, 'status' => 'confirmed', 'amount_minor' => 87500]);
+        $this->assertDatabaseHas('contribution_record_adjustments', ['id' => $adjustment->id, 'status' => 'pending']);
+        $this->assertDatabaseCount('wallet_ledger_transactions', 0);
+        $this->assertDatabaseCount('wallet_ledger_entries', 0);
+    }
+
+
+    public function test_approved_contribution_correction_posts_only_the_amount_delta(): void
+    {
+        [$owner, $reviewer, $business, $group] = $this->groupWithTwoMembers();
+        $record = ContributionRecord::query()->create([
+            'thrift_group_id' => $group->id, 'user_id' => $owner->id, 'recorded_by_user_id' => $reviewer->id,
+            'amount_minor' => 87500, 'currency_code' => 'NGN', 'status' => 'confirmed',
+            'collection_method' => 'cash', 'confirmed_by_user_id' => $owner->id, 'confirmed_at' => now(),
+        ]);
+        $originalPosting = app(WalletLedgerService::class)->creditContribution(
+            (int) $business->id, (int) $owner->id, 'NGN', 87500, (int) $record->id, (int) $reviewer->id
+        );
+        $this->assertSame('posted', $originalPosting['status']);
+        $ownerToken = $this->token($owner, str_repeat('n', 64));
+        $reviewerToken = $this->token($reviewer, str_repeat('o', 64));
+
+        $this->withToken($ownerToken)->withHeader('X-Business-Id', (string) $business->id)
+            ->postJson('/api/v1/business/groups/'.$group->id.'/contributions/'.$record->id.'/adjustments', [
+                'adjustment_type' => 'correction',
+                'proposed_amount_minor' => 100000,
+                'reason' => 'The original recorded contribution amount was understated.',
+            ])->assertCreated();
+        $adjustment = ContributionRecordAdjustment::query()->firstOrFail();
+
+        $this->withToken($reviewerToken)->withHeader('X-Business-Id', (string) $business->id)
+            ->postJson('/api/v1/business/groups/'.$group->id.'/adjustments/'.$adjustment->id.'/decide', [
+                'decision' => 'approved', 'decision_note' => 'Verified the receipt and approved the amount correction.',
+            ])->assertOk()->assertJsonPath('data.status', 'approved');
+
+        $this->assertDatabaseHas('contribution_records', ['id' => $record->id, 'status' => 'confirmed', 'amount_minor' => 100000]);
+        $this->assertSame(100000, app(WalletLedgerService::class)->balance((int) $business->id, (int) $owner->id, 'NGN'));
+        $this->assertSame(2, DB::table('wallet_ledger_transactions')->where('business_id', $business->id)->count());
+        $this->assertSame(4, DB::table('wallet_ledger_entries')->count());
+        $this->assertDatabaseHas('business_audit_events', [
+            'action' => 'contribution_adjustment.approved',
+            'subject_id' => $adjustment->id,
+        ]);
+    }
+
 }

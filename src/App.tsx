@@ -121,8 +121,8 @@ export default function App() {
   );
 }
 
-function SectionHeading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: string }) {
-  return <div className="section-heading"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{description}</p></div>{action && <button className="button button-primary" onClick={() => window.alert('This action will be connected when the corresponding workflow is implemented.')}>{action}<ArrowRight size={16} /></button>}</div>;
+function SectionHeading({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
+  return <div className="section-heading"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{description}</p></div></div>;
 }
 
 function EmptyPanel({ icon: Icon, title, body }: { icon: LucideIcon; title: string; body: string }) {
@@ -292,6 +292,19 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletError, setWalletError] = useState('');
   const [walletRefreshKey, setWalletRefreshKey] = useState(0);
+  const [groupName, setGroupName] = useState('');
+  const [groupDescription, setGroupDescription] = useState('');
+  const [groupCurrency, setGroupCurrency] = useState('NGN');
+  const [groupCreating, setGroupCreating] = useState(false);
+  const [groupFeedback, setGroupFeedback] = useState('');
+  const [groupError, setGroupError] = useState('');
+  const [adjustmentRecordId, setAdjustmentRecordId] = useState('');
+  const [adjustmentType, setAdjustmentType] = useState<'correction' | 'reversal'>('correction');
+  const [adjustmentAmount, setAdjustmentAmount] = useState('');
+  const [adjustmentReason, setAdjustmentReason] = useState('');
+  const [adjustmentSubmitting, setAdjustmentSubmitting] = useState(false);
+  const [adjustmentFeedback, setAdjustmentFeedback] = useState('');
+  const [adjustmentError, setAdjustmentError] = useState('');
 
   useEffect(() => {
     if (!token) { setAuthLoading(false); setProfile(null); setDashboardData(null); return; }
@@ -462,7 +475,7 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   }
 
   useEffect(() => {
-    if (!token || !selectedBusinessId || !['Wallet', 'Overview', 'Deposit & payout'].includes(active)) return;
+    if (!token || !selectedBusinessId || !['Wallet', 'Overview', 'Deposit & payout', 'Statements'].includes(active)) return;
     let cancelled = false;
     setWalletLoading(true); setWalletError('');
     const country = dashboardData?.workspaces.find(workspace => String(workspace.id) === selectedBusinessId)?.country_code;
@@ -478,7 +491,7 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   }, [token, selectedBusinessId, active, walletRefreshKey, dashboardData]);
 
   useEffect(() => {
-    if (!token || !selectedBusinessId || active !== 'Deposit & payout') return;
+    if (!token || !selectedBusinessId || !['Deposit & payout', 'Statements'].includes(active)) return;
     let cancelled = false;
     setPaymentLoading(true); setPaymentError('');
     const headers = { Authorization: 'Bearer ' + token, Accept: 'application/json', 'X-Business-Id': selectedBusinessId };
@@ -632,6 +645,52 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Could not create your account.'); setAuthLoading(false);
     }
+  }
+
+  async function submitContributionAdjustment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const selectedRecord = dashboardData?.recent_contributions.find(record => String(record.id) === adjustmentRecordId);
+    if (!token || !selectedBusinessId || !selectedRecord) { setAdjustmentError('Choose a contribution record from your account first.'); return; }
+    setAdjustmentSubmitting(true); setAdjustmentFeedback(''); setAdjustmentError('');
+    try {
+      const payload: { adjustment_type: 'correction' | 'reversal'; reason: string; proposed_amount_minor?: number } = { adjustment_type: adjustmentType, reason: adjustmentReason.trim() };
+      if (adjustmentType === 'correction') payload.proposed_amount_minor = Math.round(Number(adjustmentAmount) * 100);
+      const response = await fetch(`/api/v1/business/groups/${selectedRecord.thrift_group_id}/contributions/${selectedRecord.id}/adjustments`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'Content-Type': 'application/json', 'X-Business-Id': selectedBusinessId },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json() as { message?: string; errors?: Record<string, string[]> };
+      if (!response.ok) throw new Error(result.message ?? Object.values(result.errors ?? {}).flat()[0] ?? 'Could not submit the adjustment request. Check your group permissions.');
+      setAdjustmentFeedback(result.message ?? 'Adjustment request submitted for independent review.');
+      setAdjustmentReason(''); setAdjustmentAmount('');
+    } catch (cause) {
+      setAdjustmentError(cause instanceof Error ? cause.message : 'Could not submit the adjustment request.');
+    } finally { setAdjustmentSubmitting(false); }
+  }
+
+  async function createThriftGroup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token || !selectedBusinessId) { setGroupError('Choose an active business workspace before creating a group.'); return; }
+    setGroupCreating(true); setGroupFeedback(''); setGroupError('');
+    try {
+      const response = await fetch('/api/v1/business/groups', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'Content-Type': 'application/json', 'X-Business-Id': selectedBusinessId },
+        body: JSON.stringify({ name: groupName.trim(), description: groupDescription.trim() || null, currency_code: groupCurrency }),
+      });
+      const result = await response.json() as { data?: { id?: number; name?: string }; message?: string; errors?: Record<string, string[]> };
+      if (!response.ok) throw new Error(result.message ?? Object.values(result.errors ?? {}).flat()[0] ?? 'Could not create the thrift group. Check your workspace permissions.');
+      const refreshed = await fetch('/api/v1/dashboard/summary', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
+      if (refreshed.ok) {
+        const summary = await refreshed.json() as { data: DashboardSummary };
+        setDashboardData(summary.data);
+      }
+      setGroupFeedback(result.message ?? `Thrift group${result.data?.name ? ` “${result.data.name}”` : ''} created successfully.`);
+      setGroupName(''); setGroupDescription('');
+    } catch (cause) {
+      setGroupError(cause instanceof Error ? cause.message : 'Could not create the thrift group.');
+    } finally { setGroupCreating(false); }
   }
 
   async function signOut() {
@@ -808,8 +867,39 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
     </form>
   </section>;
 
-  if (active === 'My groups' && dashboardData) return <><SectionHeading eyebrow="MEMBER WORKSPACE" title="My groups" description="Thrift groups where you have active membership." />{dashboardData.groups.length ? <div className="content-grid">{dashboardData.groups.map(group => <section className="panel" key={group.id}><div className="panel-heading"><div><h2>{group.name}</h2><p>{group.description || 'No group description provided.'}</p></div><span className="status-pill status-neutral">{group.status}</span></div><div className="stat-foot muted">{group.currency_code} · {group.role} · Group #{group.id}</div></section>)}</div> : <EmptyPanel icon={Users} title="No active thrift groups yet" body="When you join a thrift group, it will appear here." />}</>;
+  if (active === 'My groups' && dashboardData) return <><SectionHeading eyebrow="MEMBER WORKSPACE" title="My groups" description="View your active thrift groups or create a group in a workspace where you have arrangement-management permission." />
+    <section className="panel"><div className="panel-heading"><div><h2>Create a thrift group</h2><p>Creates a group record and makes you its organizer. It does not start collections or move money.</p></div></div>
+      {!dashboardData.workspaces.length ? <EmptyPanel icon={Users} title="Create a workspace first" body="A business workspace is required before a thrift group can be created." /> : <form className="pin-form" onSubmit={createThriftGroup}>
+        <label htmlFor="new-group-workspace">Workspace</label><select id="new-group-workspace" required value={selectedBusinessId} onChange={event => setSelectedBusinessId(event.target.value)}>{dashboardData.workspaces.map(workspace => <option key={workspace.id} value={String(workspace.id)}>{workspace.name} · {workspace.country_code} · {workspace.role}</option>)}</select>
+        <label htmlFor="new-group-name">Group name</label><input id="new-group-name" required minLength={2} maxLength={160} value={groupName} onChange={event => setGroupName(event.target.value)} placeholder="e.g. Monthly family savings" />
+        <label htmlFor="new-group-description">Description (optional)</label><textarea id="new-group-description" maxLength={2000} value={groupDescription} onChange={event => setGroupDescription(event.target.value)} placeholder="Purpose, rules, or contribution expectations" />
+        <label htmlFor="new-group-currency">Currency</label><select id="new-group-currency" value={groupCurrency} onChange={event => setGroupCurrency(event.target.value)}><option value="NGN">NGN · Nigerian naira</option><option value="GHS">GHS · Ghanaian cedi</option></select>
+        {groupError && <p className="auth-error" role="alert">{groupError}</p>}{groupFeedback && <p className="account-success" role="status">{groupFeedback}</p>}
+        <button className="button button-primary" type="submit" disabled={groupCreating || !selectedBusinessId || !groupName.trim()}>{groupCreating ? 'Creating group…' : 'Create thrift group'}</button>
+      </form>}
+    </section>
+    {dashboardData.groups.length ? <div className="content-grid">{dashboardData.groups.map(group => <section className="panel" key={group.id}><div className="panel-heading"><div><h2>{group.name}</h2><p>{group.description || 'No group description provided.'}</p></div><span className="status-pill status-neutral">{group.status}</span></div><div className="stat-foot muted">{group.currency_code} · {group.role} · Group #{group.id}</div></section>)}</div> : <EmptyPanel icon={Users} title="No active thrift groups yet" body="Create a group above or accept an invitation to join one." />}</>;
   if (active === 'Contributions' && dashboardData) return <><SectionHeading eyebrow="MEMBER WORKSPACE" title="Contributions" description="Your contribution records from groups you belong to." />{dashboardData.recent_contributions.length ? <section className="panel"><div className="panel-heading"><div><h2>Recent contribution records</h2><p>Record confirmation is not proof of bank deposit or provider settlement.</p></div></div><div className="contribution-list">{dashboardData.recent_contributions.map(record => <div className="check-row" key={record.id}><span className="check-number">{record.status === 'confirmed' ? <CheckCircle2 size={17} /> : <CalendarClock size={17} />}</span><div><strong>{record.group?.name ?? `Group #${record.thrift_group_id}`}</strong><p>{new Date(record.created_at).toLocaleDateString()} · {record.collection_method.replace('_', ' ')}</p></div><div className="contribution-amount"><strong>{new Intl.NumberFormat('en-NG', { style: 'currency', currency: record.currency_code }).format(record.amount_minor / 100)}</strong><small>{record.status}</small></div></div>)}</div></section> : <EmptyPanel icon={Wallet} title="No contribution records yet" body="Records will appear here when a permitted organizer or collector records a contribution for you." />}</>;
+
+  if (active === 'Statements') return <><SectionHeading eyebrow="MEMBER WORKSPACE · ACCOUNT RECORDS" title="Statements & activity" description="Review records returned by your authenticated contribution, wallet, deposit, and payout APIs. These records are not bank settlement certificates." />
+    <section className="panel"><div className="panel-heading"><div><h2>Contribution statement</h2><p>Recent contribution records across your groups.</p></div></div>
+      {dashboardData?.recent_contributions.length ? <div className="contribution-list">{dashboardData.recent_contributions.map(record => <div className="check-row" key={'statement-contribution-'+record.id}><span className="check-number">{record.status === 'confirmed' ? <CheckCircle2 size={17} /> : <CalendarClock size={17} />}</span><div><strong>{record.group?.name ?? `Group #${record.thrift_group_id}`}</strong><p>{new Date(record.created_at).toLocaleString()} · {record.collection_method.replaceAll('_', ' ')} · {record.status}</p></div><div className="contribution-amount"><strong>{new Intl.NumberFormat('en-NG', { style: 'currency', currency: record.currency_code }).format(record.amount_minor / 100)}</strong></div></div>)}</div> : <EmptyPanel icon={FileText} title="No contribution records" body="There are no contribution records available for this account yet." />}</section>
+    {walletPanel}
+    <section className="panel"><div className="panel-heading"><div><h2>Deposit and payout requests</h2><p>Request status from the payment workflow API.</p></div><button className="text-button" onClick={() => setPaymentRefreshKey(value => value + 1)}><RefreshCw size={14} /> Refresh</button></div>
+      {paymentLoading ? <p className="muted">Loading payment requests…</p> : <><h3>Deposits</h3>{depositRequests.length ? <div className="payment-history">{depositRequests.map(item => <PaymentHistoryRow key={'statement-deposit-'+item.id} item={item} />)}</div> : <p className="muted">No deposit requests.</p>}<h3>Payouts</h3>{payoutRequests.length ? <div className="payment-history">{payoutRequests.map(item => <PaymentHistoryRow key={'statement-payout-'+item.id} item={item} />)}</div> : <p className="muted">No payout requests.</p>}</>}
+    </section></>;
+
+  if (active === 'Support & disputes') return <><SectionHeading eyebrow="MEMBER WORKSPACE · CONTRIBUTION CORRECTIONS" title="Support & disputes" description="Submit an auditable correction or reversal request for a contribution record. Requests do not change the original record or move money automatically." />
+    <section className="panel"><div className="panel-heading"><div><h2>Request a contribution review</h2><p>Another authorized group member must review the request; you cannot approve your own request.</p></div><CircleHelp size={22} /></div>
+      {!dashboardData?.recent_contributions.length ? <EmptyPanel icon={FileText} title="No contribution records available" body="A review request can be made after a contribution record appears in your account." /> : <form className="pin-form" onSubmit={submitContributionAdjustment}>
+        <label htmlFor="adjustment-record">Contribution record</label><select id="adjustment-record" required value={adjustmentRecordId} onChange={event => setAdjustmentRecordId(event.target.value)}><option value="">Choose a contribution record</option>{dashboardData.recent_contributions.map(record => <option key={record.id} value={String(record.id)}>#{record.id} · {record.group?.name ?? `Group #${record.thrift_group_id}`} · {new Intl.NumberFormat('en-NG', { style: 'currency', currency: record.currency_code }).format(record.amount_minor / 100)} · {record.status}</option>)}</select>
+        <label htmlFor="adjustment-type">Request type</label><select id="adjustment-type" value={adjustmentType} onChange={event => setAdjustmentType(event.target.value as 'correction' | 'reversal')}><option value="correction">Correction · propose a replacement amount</option><option value="reversal">Reversal · request that this record be reversed</option></select>
+        {adjustmentType === 'correction' && <><label htmlFor="adjustment-amount">Proposed corrected amount</label><input id="adjustment-amount" type="number" min="0.01" step="0.01" required value={adjustmentAmount} onChange={event => setAdjustmentAmount(event.target.value)} /></>}
+        <label htmlFor="adjustment-reason">Reason for review</label><textarea id="adjustment-reason" required minLength={8} maxLength={500} value={adjustmentReason} onChange={event => setAdjustmentReason(event.target.value)} placeholder="Explain the discrepancy and the evidence available." />
+        {adjustmentError && <p className="auth-error" role="alert">{adjustmentError}</p>}{adjustmentFeedback && <p className="account-success" role="status">{adjustmentFeedback}</p>}
+        <button className="button button-primary" type="submit" disabled={adjustmentSubmitting || !adjustmentRecordId || !adjustmentReason.trim() || (adjustmentType === 'correction' && (!adjustmentAmount || Number(adjustmentAmount) <= 0))}>{adjustmentSubmitting ? 'Submitting request…' : 'Submit for independent review'}</button>
+      </form>}
+    </section><section className="panel security-note"><div className="assurance-icon"><ShieldCheck size={21} /></div><div><strong>Original records are protected</strong><p>The API records the request and audit event. It does not silently overwrite the original contribution or post a financial adjustment.</p></div></section></>;
 
   if (active === 'Deposit review') return <><SectionHeading eyebrow="BUSINESS WORKSPACE · AUTHORIZED REVIEWERS" title="Deposit review" description="Independently review provider notifications and record an auditable evidence decision." />{providerDepositReviewPanel}</>;
 
@@ -829,7 +919,7 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
       Contributions: { title: 'No contribution records loaded', desc: 'Confirmed and pending records will appear here when connected to your authenticated account data.', icon: Wallet },
       'Bank accounts': { title: 'Your deposit accounts', desc: 'View your dedicated deposit accounts and request another supported bank account.', icon: Landmark },
       Statements: { title: 'Statements will appear here', desc: 'Your available statements and receipts will be listed here after the statement API is connected.', icon: FileText },
-      'Support & disputes': { title: 'Support centre', desc: 'Support requests and dispute tracking will be available here when their workflows are implemented.', icon: CircleHelp },
+      'Support & disputes': { title: 'Support API not yet available', desc: 'The current API exposes contribution-adjustment requests and business audit records, but no dedicated support-ticket or dispute-case endpoint. No fake ticket submission is shown here.', icon: CircleHelp },
     };
     const d = details[active] ?? details['My groups'];
     return <><SectionHeading eyebrow="MEMBER WORKSPACE" title={active} description="A clear view of your thrift activity and account." /><EmptyPanel icon={d.icon} title={d.title} body={d.desc} /></>;
@@ -847,12 +937,14 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
       <article className="stat-card"><div className="stat-top"><span>Confirmed records</span><span className="stat-icon green"><CheckCircle2 size={19} /></span></div><div className="stat-value">{dashboardData?.confirmed_contribution_totals.reduce((sum, total) => sum + total.records_count, 0) ?? '—'}</div><div className="stat-foot muted">Confirmed records; not settlement proof</div></article>
     </section>
     <div className="content-grid">
-      <section className="panel activity-panel"><div className="panel-heading"><div><h2>Recent activity</h2><p>Your latest contribution and account events</p></div><button className="text-button" onClick={() => window.alert('Activity history will be available when the records API is connected.')}>View history <ArrowRight size={15} /></button></div>{dashboardData?.recent_contributions.length ? <div className="contribution-list">{dashboardData.recent_contributions.slice(0, 5).map(record => <div className="check-row" key={record.id}><span className="check-number">{record.status === 'confirmed' ? <CheckCircle2 size={17} /> : <CalendarClock size={17} />}</span><div><strong>{record.group?.name ?? `Group #${record.thrift_group_id}`}</strong><p>{new Date(record.created_at).toLocaleDateString()} · {record.status}</p></div><div className="contribution-amount"><strong>{new Intl.NumberFormat('en-NG', { style: 'currency', currency: record.currency_code }).format(record.amount_minor / 100)}</strong></div></div>)}</div> : <EmptyPanel icon={ArrowDownLeft} title="No contribution activity yet" body="Your contribution records will appear here when they exist in your groups." />}</section>
+      <section className="panel activity-panel"><div className="panel-heading"><div><h2>Recent activity</h2><p>Your latest contribution and account events</p></div><button className="text-button" onClick={() => { const url = new URL(window.location.href); url.searchParams.set('section', 'Statements'); window.history.pushState({}, '', url.pathname + url.search + url.hash); window.dispatchEvent(new PopStateEvent('popstate')); }}>View history <ArrowRight size={15} /></button></div>{dashboardData?.recent_contributions.length ? <div className="contribution-list">{dashboardData.recent_contributions.slice(0, 5).map(record => <div className="check-row" key={record.id}><span className="check-number">{record.status === 'confirmed' ? <CheckCircle2 size={17} /> : <CalendarClock size={17} />}</span><div><strong>{record.group?.name ?? `Group #${record.thrift_group_id}`}</strong><p>{new Date(record.created_at).toLocaleDateString()} · {record.status}</p></div><div className="contribution-amount"><strong>{new Intl.NumberFormat('en-NG', { style: 'currency', currency: record.currency_code }).format(record.amount_minor / 100)}</strong></div></div>)}</div> : <EmptyPanel icon={ArrowDownLeft} title="No contribution activity yet" body="Your contribution records will appear here when they exist in your groups." />}</section>
       <section className="panel next-panel"><div className="panel-heading"><div><h2>Upcoming contributions</h2><p>Scheduled due dates from your active groups</p></div></div>{dashboardData?.upcoming_obligations.length ? <div className="contribution-list">{dashboardData.upcoming_obligations.slice(0, 5).map(item => <div className="check-row" key={item.id}><span className="check-number"><CalendarClock size={17} /></span><div><strong>{item.group?.name ?? 'Thrift group'}</strong><p>Due {item.due_on ? new Date(`${item.due_on}T00:00:00`).toLocaleDateString() : 'date not set'}</p></div><div className="contribution-amount"><strong>{new Intl.NumberFormat('en-NG', { style: 'currency', currency: item.currency_code }).format(item.expected_amount_minor / 100)}</strong><small>Scheduled</small></div></div>)}</div> : <EmptyPanel icon={CalendarClock} title="No upcoming schedule loaded" body="Upcoming items appear after your organizer creates a schedule and generates due-date cycles. These entries do not initiate collections." />}</section>
     </div>
     <section className="panel assurance"><div className="assurance-icon"><ShieldCheck size={21} /></div><div><strong>Clear records. Accountable collections.</strong><p>Financial entries will clearly distinguish recorded collections, confirmed deposits and reconciled transactions.</p></div></section>
   </>;
 }
+
+type AdminAuditEvent = { id: number; action: string; actor?: { id: number; name: string; email: string } | null; subject?: { id: number; name: string; email: string } | null; metadata?: Record<string, unknown> | null; created_at: string };
 
 type AdminDashboardData = {
   administrator: { id: number; name: string; email: string };
@@ -869,10 +961,130 @@ type AdminDashboardData = {
   message: string;
 };
 
+type PlatformUser = { id: number; name: string; email: string; email_verified_at: string | null; platform_role: string; created_at: string };
+type PlatformUserPage = { data: PlatformUser[]; current_page: number; last_page: number; per_page: number; total: number };
+
+function PlatformUsersPanel() {
+  const [query, setQuery] = useState('');
+  const [submittedQuery, setSubmittedQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [result, setResult] = useState<PlatformUserPage | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    const token = sessionStorage.getItem('tcp_access_token') ?? '';
+    if (!token) { setError('Sign in with an authorized platform administrator account.'); setLoading(false); return () => { cancelled = true; }; }
+    setLoading(true); setError('');
+    const params = new URLSearchParams({ per_page: '25', page: String(page) });
+    if (submittedQuery.trim()) params.set('q', submittedQuery.trim());
+    fetch('/api/v1/admin/users?' + params.toString(), { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } })
+      .then(async response => {
+        const payload = await response.json() as { data?: PlatformUserPage; message?: string };
+        if (!response.ok) throw new Error(response.status === 403 ? 'This account needs the platform.users.view permission.' : payload.message ?? 'Could not load platform members.');
+        return payload;
+      })
+      .then(payload => { if (!cancelled) setResult(payload.data ?? null); })
+      .catch(cause => { if (!cancelled) { setResult(null); setError(cause instanceof Error ? cause.message : 'Could not load platform members.'); } })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [page, submittedQuery]);
+
+  function search(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setPage(1); setSubmittedQuery(query); }
+
+  return <>
+    <SectionHeading eyebrow="PLATFORM ADMINISTRATION" title="Members & businesses" description="Search the protected platform member directory. This view is read-only and never exposes credentials or private security fields." />
+    <section className="panel">
+      <form className="security-settings-form" onSubmit={search}>
+        <label htmlFor="platform-member-search">Search by name or email</label>
+        <input id="platform-member-search" value={query} maxLength={100} onChange={event => setQuery(event.target.value)} placeholder="Enter a member name or email" />
+        <button className="button button-primary" type="submit" disabled={loading}><Search size={16} /> Search members</button>
+      </form>
+      {error && <div className="inline-alert inline-alert-error" role="alert">{error}</div>}
+      {loading ? <EmptyPanel icon={Activity} title="Loading platform members" body="Checking permission and retrieving a paginated directory." /> : result ? <>
+        <div className="panel-heading"><div><h2>Platform member directory</h2><p>{result.total.toLocaleString()} matching account(s) · Page {result.current_page} of {result.last_page}</p></div><button className="text-button" onClick={() => { setPage(1); setSubmittedQuery(query); }}><RefreshCw size={14} /> Refresh</button></div>
+        {result.data.length ? <div className="contribution-list">{result.data.map(member => <div className="check-row" key={member.id}>
+          <span className="check-number"><Users size={17} /></span>
+          <div><strong>{member.name}</strong><p>{member.email} · {member.email_verified_at ? 'Email verified' : 'Email not verified'}</p><p>Joined {new Date(member.created_at).toLocaleDateString()}</p></div>
+          <div className="contribution-amount"><span className="status-pill status-neutral">{member.platform_role}</span><small>Account #{member.id}</small></div>
+        </div>)}</div> : <EmptyPanel icon={Users} title="No members found" body="Try a different name or email address." />}
+        <div className="panel-heading"><p className="muted">Directory only. Role changes, account suspension, collections and financial decisions are not performed from this screen.</p><div className="inline-actions"><button className="button button-secondary" type="button" disabled={result.current_page <= 1 || loading} onClick={() => setPage(value => Math.max(1, value - 1))}>Previous</button><button className="button button-secondary" type="button" disabled={result.current_page >= result.last_page || loading} onClick={() => setPage(value => value + 1)}>Next</button></div></div>
+      </> : null}
+    </section>
+  </>;
+}
+type OversightRow = Record<string, unknown>;
+type OversightCategory = { label: string; rows: OversightRow[] };
+
+function PlatformOversightPanel({ title, endpoint, description }: { title: string; endpoint: string; description: string }) {
+  const [categories, setCategories] = useState<OversightCategory[]>([]);
+  const [query, setQuery] = useState('');
+  const [submittedQuery, setSubmittedQuery] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const token = sessionStorage.getItem('tcp_access_token') ?? '';
+    if (!token) { setCategories([]); setError('Sign in with an authorized platform administrator account.'); setLoading(false); return () => { cancelled = true; }; }
+    setLoading(true); setError('');
+    const params = new URLSearchParams({ per_page: '25' });
+    if (endpoint.endsWith('/businesses') && submittedQuery.trim()) params.set('q', submittedQuery.trim());
+    fetch(endpoint + '?' + params.toString(), { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } })
+      .then(async response => {
+        const payload = await response.json() as { data?: unknown; message?: string };
+        if (!response.ok) throw new Error(response.status === 403 ? 'Access denied. This account is missing the permission required for this platform oversight view.' : payload.message ?? 'Could not load platform oversight data.');
+        return payload;
+      })
+      .then(payload => {
+        const root = payload.data;
+        let next: OversightCategory[] = [];
+        if (Array.isArray(root)) next = [{ label: 'Results', rows: root as OversightRow[] }];
+        else if (root && typeof root === 'object') {
+          const record = root as Record<string, unknown>;
+          if (Array.isArray(record.data)) next = [{ label: title, rows: record.data as OversightRow[] }];
+          else next = Object.entries(record).filter((entry): entry is [string, unknown[]] => Array.isArray(entry[1])).map(([key, rows]) => ({ label: key.replaceAll('_', ' '), rows: rows as OversightRow[] }));
+        }
+        if (!cancelled) setCategories(next);
+      })
+      .catch(cause => { if (!cancelled) { setCategories([]); setError(cause instanceof Error ? cause.message : 'Could not load platform oversight data.'); } })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [endpoint, submittedQuery, reload, title]);
+
+  const displayValue = (value: unknown) => {
+    if (value === null || value === undefined || value === '') return '—';
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+    if (typeof value === 'object') return '[details withheld]';
+    return String(value);
+  };
+  const labelFor = (key: string) => key.replaceAll('_', ' ').replace(/\\b\\w/g, letter => letter.toUpperCase());
+
+  return <>
+    <SectionHeading eyebrow="PLATFORM ADMINISTRATION" title={title} description={description} />
+    <section className="panel">
+      <div className="panel-heading"><div><h2>Protected oversight records</h2><p>Read-only data. Sensitive decisions remain in existing audited workflows.</p></div><button className="text-button" type="button" onClick={() => setReload(value => value + 1)} disabled={loading}><RefreshCw size={14} /> Refresh</button></div>
+      {endpoint.endsWith('/businesses') && <form className="security-settings-form" onSubmit={event => { event.preventDefault(); setSubmittedQuery(query); }}><label htmlFor="platform-business-search">Search businesses</label><input id="platform-business-search" value={query} maxLength={100} onChange={event => setQuery(event.target.value)} placeholder="Business name or slug" /><button className="button button-primary" type="submit" disabled={loading}><Search size={16} /> Search</button></form>}
+      {error && <div className="inline-alert inline-alert-error" role="alert">{error}</div>}
+      {loading ? <EmptyPanel icon={Activity} title="Loading oversight data" body="Checking your platform permission and retrieving protected records." /> : categories.length ? categories.map(category => <div key={category.label} className="oversight-category"><div className="panel-heading"><div><h2>{labelFor(category.label)}</h2><p>{category.rows.length} record(s) returned · latest items first where applicable</p></div></div>
+        {category.rows.length ? <div className="contribution-list">{category.rows.map((row, index) => {
+          const entries = Object.entries(row).filter(([key, value]) => !['source_data', 'settings', 'credentials_ciphertext', 'destination_ciphertext', 'proof_path'].includes(key) && (value === null || ['string', 'number', 'boolean'].includes(typeof value))).slice(0, 8);
+          const primary = row.name ?? row.business_name ?? row.group_name ?? row.requester_name ?? row.member_name ?? row.client_reference ?? row.source_reference ?? row.id ?? 'Record';
+          const status = row.status ?? row.adjustment_type ?? row.provider ?? row.source;
+          return <div className="check-row" key={String(row.id ?? index)}><span className="check-number"><ClipboardCheck size={17} /></span><div className="oversight-record"><strong>{displayValue(primary)}</strong><p>{entries.slice(0, 4).filter(([key]) => !['id', 'name', 'business_name', 'group_name', 'requester_name', 'member_name', 'status'].includes(key)).map(([key, value]) => labelFor(key) + ': ' + displayValue(value)).join(' · ')}</p><p>{entries.slice(4, 8).map(([key, value]) => labelFor(key) + ': ' + displayValue(value)).join(' · ')}</p></div><div className="contribution-amount"><span className="status-pill status-neutral">{displayValue(status)}</span><small>#{displayValue(row.id)}</small></div></div>;
+        })}</div> : <EmptyPanel icon={ClipboardCheck} title="No records in this category" body="No matching records were returned for this queue." />}</div>) : <EmptyPanel icon={ShieldCheck} title="No oversight data returned" body="The API returned no categories for this view, or your account cannot access this information." />}
+    </section>
+  </>;
+}
 function AdminDashboard({ active }: { active: string }) {
   const [data, setData] = useState<AdminDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [auditEvents, setAuditEvents] = useState<AdminAuditEvent[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -896,6 +1108,40 @@ function AdminDashboard({ active }: { active: string }) {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (active !== 'Reports & audit') return;
+    let cancelled = false;
+    const token = sessionStorage.getItem('tcp_access_token') ?? '';
+    if (!token) { setAuditEvents([]); setAuditError('Sign in with an authorized platform-admin account to view audit events.'); return () => { cancelled = true; }; }
+    setAuditLoading(true); setAuditError('');
+    fetch('/api/v1/admin/audit-events', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } })
+      .then(async response => {
+        const result = await response.json() as { data?: { data?: AdminAuditEvent[] }; message?: string };
+        if (!response.ok) throw new Error(response.status === 403 ? 'This account needs the platform.audit.view permission.' : result.message ?? 'Could not load platform audit events.');
+        return result;
+      })
+      .then(result => { if (!cancelled) setAuditEvents(result.data?.data ?? []); })
+      .catch(cause => { if (!cancelled) { setAuditEvents([]); setAuditError(cause instanceof Error ? cause.message : 'Could not load platform audit events.'); } })
+      .finally(() => { if (!cancelled) setAuditLoading(false); });
+    return () => { cancelled = true; };
+  }, [active]);
+
+  if (active === 'Reports & audit') return <>
+    <SectionHeading eyebrow="PLATFORM ADMINISTRATION" title="Reports & audit" description="Audit events retrieved from the dedicated permission-protected platform audit endpoint." />
+    {auditLoading ? <section className="panel"><EmptyPanel icon={Activity} title="Loading audit events" body="Checking platform.audit.view permission and retrieving the latest events." /></section>
+      : auditError ? <section className="panel"><EmptyPanel icon={ShieldCheck} title="Audit records unavailable" body={auditError} /></section>
+      : <section className="panel"><div className="panel-heading"><div><h2>Platform audit trail</h2><p>Latest 50 events, newest first. Sensitive metadata is not expanded by default.</p></div><button className="text-button" onClick={() => { setAuditEvents([]); setAuditError(''); setAuditLoading(true); const token = sessionStorage.getItem('tcp_access_token') ?? ''; fetch('/api/v1/admin/audit-events', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } }).then(async response => { const result = await response.json() as { data?: { data?: AdminAuditEvent[] }; message?: string }; if (!response.ok) throw new Error(result.message ?? 'Could not refresh audit events.'); setAuditEvents(result.data?.data ?? []); }).catch(cause => setAuditError(cause instanceof Error ? cause.message : 'Could not refresh audit events.')).finally(() => setAuditLoading(false)); }}><RefreshCw size={14} /> Refresh</button></div>
+        {auditEvents.length ? <div className="contribution-list">{auditEvents.map(event => <div className="check-row" key={event.id}><span className="check-number"><ShieldCheck size={17} /></span><div><strong>{event.action.replaceAll('.', ' ')}</strong><p>{event.actor?.name ?? 'System/unknown actor'}{event.subject?.name ? ` · Subject: ${event.subject.name}` : ''}</p></div><div className="contribution-amount"><small>{new Date(event.created_at).toLocaleString()}</small></div></div>)}</div> : <EmptyPanel icon={Activity} title="No audit events returned" body="No events are available for this query, or the platform has not recorded any yet." />}
+      </section>}
+  </>;
+
+  if (active === 'Members & businesses') return <><PlatformUsersPanel /><PlatformOversightPanel title="Business directory" endpoint="/api/v1/admin/businesses" description="Search businesses and review membership counts and thrift-group totals across the platform." /></>;
+  if (active === 'Collections') return <PlatformOversightPanel title="Collections" endpoint="/api/v1/admin/collections" description="Monitor contribution records, deposit intents, and payout requests across businesses. This screen cannot approve or execute payments." />;
+  if (active === 'Reconciliation') return <PlatformOversightPanel title="Reconciliation" endpoint="/api/v1/admin/reconciliation" description="Review reconciliation batches and unresolved statement exceptions across the platform. Matching and ledger posting remain in the authorized business workflow." />;
+  if (active === 'Approvals & disputes') return <PlatformOversightPanel title="Approvals & disputes" endpoint="/api/v1/admin/approvals" description="Review pending deposit evidence, payout decisions, and contribution-adjustment requests. This is an oversight queue, not a decision or payout control." />;
+
+  if (!['Overview', 'Settings'].includes(active)) return <><SectionHeading eyebrow="PLATFORM ADMINISTRATION" title={active} description="This area is available only when a matching protected platform-admin API workflow exists." /><section className="panel"><EmptyPanel icon={ShieldCheck} title={`${active} workflow is not exposed by the current platform-admin API`} body="No mock controls or fabricated records are shown here." /></section></>;
 
   return <>
     <SectionHeading eyebrow="PLATFORM ADMINISTRATION" title={active === 'Overview' ? 'Operations overview.' : active} description="Protected, read-only operational data from the authenticated platform API." />
