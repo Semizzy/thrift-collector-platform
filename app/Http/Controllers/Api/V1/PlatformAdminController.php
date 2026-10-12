@@ -260,7 +260,7 @@ class PlatformAdminController extends Controller
         $payouts = PayoutRequest::query()
             ->join('businesses', 'businesses.id', '=', 'payout_requests.business_id')
             ->join('users', 'users.id', '=', 'payout_requests.user_id')
-            ->whereIn('payout_requests.status', ['requested', 'approved', 'manual_evidence_submitted', 'manual_evidence_accepted_unsettled'])
+            ->whereIn('payout_requests.status', ['requested', 'approved_manual_execution_pending', 'manual_payment_evidence_submitted', 'manual_evidence_accepted_unsettled'])
             ->select(['payout_requests.id', 'payout_requests.business_id', 'businesses.name as business_name',
                 'users.name as requester_name', 'payout_requests.provider', 'payout_requests.amount_minor',
                 'payout_requests.currency_code', 'payout_requests.client_reference', 'payout_requests.status',
