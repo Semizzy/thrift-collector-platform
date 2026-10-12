@@ -123,6 +123,44 @@ final class WalletLedgerConcurrencyTest extends TestCase
         $this->assertEveryJournalBalances();
     }
 
+    public function test_contribution_reversal_refuses_a_corrupted_original_journal(): void
+    {
+        if (DB::getDriverName() !== 'mysql') {
+            $this->markTestSkipped('Journal-corruption regression is validated on MySQL 8.');
+        }
+
+        $group = ThriftGroup::query()->create([
+            'business_id' => $this->businessId, 'name' => 'Corrupt Journal Group',
+            'currency_code' => 'NGN', 'status' => 'active', 'created_by_user_id' => $this->userId,
+        ]);
+        $record = ContributionRecord::query()->create([
+            'thrift_group_id' => $group->id, 'user_id' => $this->userId,
+            'recorded_by_user_id' => $this->actorId, 'amount_minor' => 2500,
+            'currency_code' => 'NGN', 'status' => 'confirmed', 'collection_method' => 'cash',
+            'confirmed_by_user_id' => $this->actorId, 'confirmed_at' => now(),
+        ]);
+        app(WalletLedgerService::class)->creditContribution(
+            $this->businessId, $this->userId, 'NGN', 2500, (int) $record->id, $this->actorId,
+        );
+
+        $original = DB::table('wallet_ledger_transactions')->where('business_id', $this->businessId)
+            ->where('idempotency_key', 'contribution:'.$record->id.':wallet-credit')->firstOrFail();
+        $walletAccountId = DB::table('wallet_accounts')->where('business_id', $this->businessId)
+            ->where('account_key', 'wallet:'.$this->userId.':NGN')->value('id');
+        DB::table('wallet_ledger_entries')->where('wallet_ledger_transaction_id', $original->id)
+            ->where('wallet_account_id', $walletAccountId)->update(['amount_minor' => 2499]);
+
+        $result = app(WalletLedgerService::class)->reverseContribution(
+            $this->businessId, (int) $record->id, 990302, $this->actorId,
+        );
+
+        self::assertSame('original_journal_invalid', $result['status']);
+        self::assertNull($result['transaction_id']);
+        self::assertSame(12500, app(WalletLedgerService::class)->balance($this->businessId, $this->userId, 'NGN'));
+        self::assertSame(0, DB::table('wallet_ledger_transactions')->where('business_id', $this->businessId)
+            ->where('idempotency_key', 'contribution:'.$record->id.':wallet-reversal')->count());
+    }
+
     private function runConcurrentReversals(int $contributionId, int $adjustmentId): array
     {
         $prefix = sys_get_temp_dir().'/wallet-reversal-race-'.bin2hex(random_bytes(8));
