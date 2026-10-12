@@ -169,11 +169,16 @@ final class ContributionCycleAndAdjustmentTest extends TestCase
                 'decision' => 'approved', 'decision_note' => 'Attempt to decide outside the group membership boundary.',
             ])->assertForbidden();
 
+        $this->assertDatabaseCount('wallet_ledger_transactions', 0);
         $this->withToken($reviewerToken)->withHeader('X-Business-Id', (string) $business->id)
             ->postJson('/api/v1/business/groups/'.$group->id.'/adjustments/'.$adjustment->id.'/decide', [
                 'decision' => 'approved', 'decision_note' => 'Reviewed the evidence independently and approved the request.',
             ])->assertOk();
 
+        // Approval is deliberately a decision record only until a reviewed reversal-posting
+        // implementation is introduced. It must not silently change the ledger or balance.
+        $this->assertDatabaseCount('wallet_ledger_transactions', 0);
+        $this->assertDatabaseCount('wallet_ledger_entries', 0);
         $this->assertDatabaseHas('contribution_records', [
             'id' => $record->id, 'status' => 'confirmed', 'amount_minor' => 87500,
         ]);
