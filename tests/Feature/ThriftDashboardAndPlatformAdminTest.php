@@ -156,7 +156,7 @@ final class ThriftDashboardAndPlatformAdminTest extends TestCase
             'name' => 'Cross-Business Administrator', 'email' => 'cross-business-admin@example.test',
             'password' => 'a-strong-test-password', 'email_verified_at' => now(),
         ]);
-        $actor->forceFill(['platform_role' => 'admin', 'platform_permissions' => []])->save();
+        $actor->forceFill(['platform_role' => 'admin', 'platform_permissions' => [], 'email_verified_at' => now()])->save();
         $business = Business::query()->create([
             'name' => 'Admin Managed Business', 'slug' => 'admin-managed-business',
             'country_code' => 'NG', 'status' => 'active', 'created_by_user_id' => $actor->id,
