@@ -18,10 +18,11 @@ class ContributionRecordController extends Controller
     public function index(Request $request, int $groupId): JsonResponse
     {
         $business = $request->attributes->get('current_business');
-        $group = ThriftGroup::query()->where('business_id', $business->id)
-            ->whereKey($groupId)
-            ->whereHas('memberships', fn ($query) => $query->where('user_id', $request->user()->id)->where('status', 'active'))
-            ->firstOrFail();
+        $groupQuery = ThriftGroup::query()->where('business_id', $business->id)->whereKey($groupId);
+        if ($request->user()->platform_role !== 'admin') {
+            $groupQuery->whereHas('memberships', fn ($members) => $members->where('user_id', $request->user()->id)->where('status', 'active'));
+        }
+        $group = $groupQuery->firstOrFail();
 
         $records = $group->contributions()->with('contributor:id,name')
             ->orderByDesc('created_at')->paginate(25, [
@@ -35,10 +36,11 @@ class ContributionRecordController extends Controller
     public function store(Request $request, int $groupId): JsonResponse
     {
         $business = $request->attributes->get('current_business');
-        $group = ThriftGroup::query()->where('business_id', $business->id)->whereKey($groupId)
-            ->where('status', 'active')
-            ->whereHas('memberships', fn ($query) => $query->where('user_id', $request->user()->id)->where('status', 'active'))
-            ->firstOrFail();
+        $groupQuery = ThriftGroup::query()->where('business_id', $business->id)->whereKey($groupId)->where('status', 'active');
+        if ($request->user()->platform_role !== 'admin') {
+            $groupQuery->whereHas('memberships', fn ($members) => $members->where('user_id', $request->user()->id)->where('status', 'active'));
+        }
+        $group = $groupQuery->firstOrFail();
 
         $data = $request->validate([
             'user_id' => ['required', 'integer', Rule::exists('thrift_group_memberships', 'user_id')->where(fn ($query) => $query->where('thrift_group_id', $group->id)->where('status', 'active'))],
@@ -76,7 +78,7 @@ class ContributionRecordController extends Controller
                 ->whereHas('group', fn ($query) => $query->where('business_id', $business->id))
                 ->whereKey($recordId)->lockForUpdate()->first();
             if (! $record) return response()->json(['message' => 'Contribution record not found.'], 404);
-            $isGroupMember = $record->group->memberships()->where('user_id', $request->user()->id)->where('status', 'active')->exists();
+            $isGroupMember = $request->user()->platform_role === 'admin' || $record->group->memberships()->where('user_id', $request->user()->id)->where('status', 'active')->exists();
             if (! $isGroupMember) return response()->json(['message' => 'Active group membership is required to confirm this record.'], 403);
             if ($record->recorded_by_user_id === $request->user()->id) {
                 return response()->json(['message' => 'The recorder cannot confirm their own contribution record.'], 403);
