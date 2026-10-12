@@ -291,6 +291,26 @@ final class PaymentWorkflowTest extends TestCase
         $this->call('POST', '/api/v1/webhooks/paystack', [], [], [], [
             'CONTENT_TYPE' => 'application/json', 'HTTP_X_PAYSTACK_SIGNATURE' => $signature,
         ], $raw)->assertOk();
+        // A valid signature does not make a changed payload safe when it reuses the same
+        // provider event identity. Quarantine the replay and preserve the original deposit.
+        $conflictingPayload = $payload;
+        $conflictingPayload['data']['amount'] = 260000;
+        $conflictingRaw = json_encode($conflictingPayload, JSON_THROW_ON_ERROR);
+        $conflictingSignature = hash_hmac('sha512', $conflictingRaw, $secret);
+        $this->call('POST', '/api/v1/webhooks/paystack', [], [], [], [
+            'CONTENT_TYPE' => 'application/json', 'HTTP_X_PAYSTACK_SIGNATURE' => $conflictingSignature,
+        ], $conflictingRaw)->assertStatus(409)->assertJsonPath('conflict', true);
+        $this->assertDatabaseHas('provider_webhook_events', [
+            'provider' => 'paystack', 'status' => 'conflict',
+        ]);
+        $this->assertDatabaseHas('provider_deposit_events', [
+            'provider_transaction_id' => '9001', 'amount_minor' => 250000,
+        ]);
+        $this->assertDatabaseHas('payment_operation_events', [
+            'operation_type' => 'provider_webhook_event',
+            'event' => 'provider_webhook_conflicting_replay',
+        ]);
+
         $eventId = \Illuminate\Support\Facades\DB::table('provider_deposit_events')->where('provider_transaction_id', '9001')->value('id');
         $this->assertDatabaseHas('provider_deposit_events', [
             'id' => $eventId, 'business_id' => $business->id, 'amount_minor' => 250000,
