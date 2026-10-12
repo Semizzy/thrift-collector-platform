@@ -121,8 +121,8 @@ export default function App() {
   );
 }
 
-function SectionHeading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: string }) {
-  return <div className="section-heading"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{description}</p></div>{action && <button className="button button-primary" onClick={() => window.alert('This action will be connected when the corresponding workflow is implemented.')}>{action}<ArrowRight size={16} /></button>}</div>;
+function SectionHeading({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
+  return <div className="section-heading"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{description}</p></div></div>;
 }
 
 function EmptyPanel({ icon: Icon, title, body }: { icon: LucideIcon; title: string; body: string }) {
@@ -292,6 +292,12 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletError, setWalletError] = useState('');
   const [walletRefreshKey, setWalletRefreshKey] = useState(0);
+  const [groupName, setGroupName] = useState('');
+  const [groupDescription, setGroupDescription] = useState('');
+  const [groupCurrency, setGroupCurrency] = useState('NGN');
+  const [groupCreating, setGroupCreating] = useState(false);
+  const [groupFeedback, setGroupFeedback] = useState('');
+  const [groupError, setGroupError] = useState('');
 
   useEffect(() => {
     if (!token) { setAuthLoading(false); setProfile(null); setDashboardData(null); return; }
@@ -634,6 +640,30 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
     }
   }
 
+  async function createThriftGroup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token || !selectedBusinessId) { setGroupError('Choose an active business workspace before creating a group.'); return; }
+    setGroupCreating(true); setGroupFeedback(''); setGroupError('');
+    try {
+      const response = await fetch('/api/v1/business/groups', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'Content-Type': 'application/json', 'X-Business-Id': selectedBusinessId },
+        body: JSON.stringify({ name: groupName.trim(), description: groupDescription.trim() || null, currency_code: groupCurrency }),
+      });
+      const result = await response.json() as { data?: { id?: number; name?: string }; message?: string; errors?: Record<string, string[]> };
+      if (!response.ok) throw new Error(result.message ?? Object.values(result.errors ?? {}).flat()[0] ?? 'Could not create the thrift group. Check your workspace permissions.');
+      const refreshed = await fetch('/api/v1/dashboard/summary', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
+      if (refreshed.ok) {
+        const summary = await refreshed.json() as { data: DashboardSummary };
+        setDashboardData(summary.data);
+      }
+      setGroupFeedback(result.message ?? `Thrift group${result.data?.name ? ` “${result.data.name}”` : ''} created successfully.`);
+      setGroupName(''); setGroupDescription('');
+    } catch (cause) {
+      setGroupError(cause instanceof Error ? cause.message : 'Could not create the thrift group.');
+    } finally { setGroupCreating(false); }
+  }
+
   async function signOut() {
     if (token) {
       try { await fetch('/api/v1/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } }); } catch { /* Clear local session even if the network is unavailable. */ }
@@ -808,8 +838,27 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
     </form>
   </section>;
 
-  if (active === 'My groups' && dashboardData) return <><SectionHeading eyebrow="MEMBER WORKSPACE" title="My groups" description="Thrift groups where you have active membership." />{dashboardData.groups.length ? <div className="content-grid">{dashboardData.groups.map(group => <section className="panel" key={group.id}><div className="panel-heading"><div><h2>{group.name}</h2><p>{group.description || 'No group description provided.'}</p></div><span className="status-pill status-neutral">{group.status}</span></div><div className="stat-foot muted">{group.currency_code} · {group.role} · Group #{group.id}</div></section>)}</div> : <EmptyPanel icon={Users} title="No active thrift groups yet" body="When you join a thrift group, it will appear here." />}</>;
+  if (active === 'My groups' && dashboardData) return <><SectionHeading eyebrow="MEMBER WORKSPACE" title="My groups" description="View your active thrift groups or create a group in a workspace where you have arrangement-management permission." />
+    <section className="panel"><div className="panel-heading"><div><h2>Create a thrift group</h2><p>Creates a group record and makes you its organizer. It does not start collections or move money.</p></div></div>
+      {!dashboardData.workspaces.length ? <EmptyPanel icon={Users} title="Create a workspace first" body="A business workspace is required before a thrift group can be created." /> : <form className="pin-form" onSubmit={createThriftGroup}>
+        <label htmlFor="new-group-workspace">Workspace</label><select id="new-group-workspace" required value={selectedBusinessId} onChange={event => setSelectedBusinessId(event.target.value)}>{dashboardData.workspaces.map(workspace => <option key={workspace.id} value={String(workspace.id)}>{workspace.name} · {workspace.country_code} · {workspace.role}</option>)}</select>
+        <label htmlFor="new-group-name">Group name</label><input id="new-group-name" required minLength={2} maxLength={160} value={groupName} onChange={event => setGroupName(event.target.value)} placeholder="e.g. Monthly family savings" />
+        <label htmlFor="new-group-description">Description (optional)</label><textarea id="new-group-description" maxLength={2000} value={groupDescription} onChange={event => setGroupDescription(event.target.value)} placeholder="Purpose, rules, or contribution expectations" />
+        <label htmlFor="new-group-currency">Currency</label><select id="new-group-currency" value={groupCurrency} onChange={event => setGroupCurrency(event.target.value)}><option value="NGN">NGN · Nigerian naira</option><option value="GHS">GHS · Ghanaian cedi</option></select>
+        {groupError && <p className="auth-error" role="alert">{groupError}</p>}{groupFeedback && <p className="account-success" role="status">{groupFeedback}</p>}
+        <button className="button button-primary" type="submit" disabled={groupCreating || !selectedBusinessId || !groupName.trim()}>{groupCreating ? 'Creating group…' : 'Create thrift group'}</button>
+      </form>}
+    </section>
+    {dashboardData.groups.length ? <div className="content-grid">{dashboardData.groups.map(group => <section className="panel" key={group.id}><div className="panel-heading"><div><h2>{group.name}</h2><p>{group.description || 'No group description provided.'}</p></div><span className="status-pill status-neutral">{group.status}</span></div><div className="stat-foot muted">{group.currency_code} · {group.role} · Group #{group.id}</div></section>)}</div> : <EmptyPanel icon={Users} title="No active thrift groups yet" body="Create a group above or accept an invitation to join one." />}</>;
   if (active === 'Contributions' && dashboardData) return <><SectionHeading eyebrow="MEMBER WORKSPACE" title="Contributions" description="Your contribution records from groups you belong to." />{dashboardData.recent_contributions.length ? <section className="panel"><div className="panel-heading"><div><h2>Recent contribution records</h2><p>Record confirmation is not proof of bank deposit or provider settlement.</p></div></div><div className="contribution-list">{dashboardData.recent_contributions.map(record => <div className="check-row" key={record.id}><span className="check-number">{record.status === 'confirmed' ? <CheckCircle2 size={17} /> : <CalendarClock size={17} />}</span><div><strong>{record.group?.name ?? `Group #${record.thrift_group_id}`}</strong><p>{new Date(record.created_at).toLocaleDateString()} · {record.collection_method.replace('_', ' ')}</p></div><div className="contribution-amount"><strong>{new Intl.NumberFormat('en-NG', { style: 'currency', currency: record.currency_code }).format(record.amount_minor / 100)}</strong><small>{record.status}</small></div></div>)}</div></section> : <EmptyPanel icon={Wallet} title="No contribution records yet" body="Records will appear here when a permitted organizer or collector records a contribution for you." />}</>;
+
+  if (active === 'Statements') return <><SectionHeading eyebrow="MEMBER WORKSPACE · ACCOUNT RECORDS" title="Statements & activity" description="Review records returned by your authenticated contribution, wallet, deposit, and payout APIs. These records are not bank settlement certificates." />
+    <section className="panel"><div className="panel-heading"><div><h2>Contribution statement</h2><p>Recent contribution records across your groups.</p></div></div>
+      {dashboardData?.recent_contributions.length ? <div className="contribution-list">{dashboardData.recent_contributions.map(record => <div className="check-row" key={'statement-contribution-'+record.id}><span className="check-number">{record.status === 'confirmed' ? <CheckCircle2 size={17} /> : <CalendarClock size={17} />}</span><div><strong>{record.group?.name ?? `Group #${record.thrift_group_id}`}</strong><p>{new Date(record.created_at).toLocaleString()} · {record.collection_method.replaceAll('_', ' ')} · {record.status}</p></div><div className="contribution-amount"><strong>{new Intl.NumberFormat('en-NG', { style: 'currency', currency: record.currency_code }).format(record.amount_minor / 100)}</strong></div></div>)}</div> : <EmptyPanel icon={FileText} title="No contribution records" body="There are no contribution records available for this account yet." />}</section>
+    {walletPanel}
+    <section className="panel"><div className="panel-heading"><div><h2>Deposit and payout requests</h2><p>Request status from the payment workflow API.</p></div><button className="text-button" onClick={() => setPaymentRefreshKey(value => value + 1)}><RefreshCw size={14} /> Refresh</button></div>
+      {paymentLoading ? <p className="muted">Loading payment requests…</p> : <><h3>Deposits</h3>{depositRequests.length ? <div className="payment-history">{depositRequests.map(item => <PaymentHistoryRow key={'statement-deposit-'+item.id} item={item} />)}</div> : <p className="muted">No deposit requests.</p>}<h3>Payouts</h3>{payoutRequests.length ? <div className="payment-history">{payoutRequests.map(item => <PaymentHistoryRow key={'statement-payout-'+item.id} item={item} />)}</div> : <p className="muted">No payout requests.</p>}</>}
+    </section></>;
 
   if (active === 'Deposit review') return <><SectionHeading eyebrow="BUSINESS WORKSPACE · AUTHORIZED REVIEWERS" title="Deposit review" description="Independently review provider notifications and record an auditable evidence decision." />{providerDepositReviewPanel}</>;
 
@@ -829,7 +878,7 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
       Contributions: { title: 'No contribution records loaded', desc: 'Confirmed and pending records will appear here when connected to your authenticated account data.', icon: Wallet },
       'Bank accounts': { title: 'Your deposit accounts', desc: 'View your dedicated deposit accounts and request another supported bank account.', icon: Landmark },
       Statements: { title: 'Statements will appear here', desc: 'Your available statements and receipts will be listed here after the statement API is connected.', icon: FileText },
-      'Support & disputes': { title: 'Support centre', desc: 'Support requests and dispute tracking will be available here when their workflows are implemented.', icon: CircleHelp },
+      'Support & disputes': { title: 'Support API not yet available', desc: 'The current API exposes contribution-adjustment requests and business audit records, but no dedicated support-ticket or dispute-case endpoint. No fake ticket submission is shown here.', icon: CircleHelp },
     };
     const d = details[active] ?? details['My groups'];
     return <><SectionHeading eyebrow="MEMBER WORKSPACE" title={active} description="A clear view of your thrift activity and account." /><EmptyPanel icon={d.icon} title={d.title} body={d.desc} /></>;
@@ -847,7 +896,7 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
       <article className="stat-card"><div className="stat-top"><span>Confirmed records</span><span className="stat-icon green"><CheckCircle2 size={19} /></span></div><div className="stat-value">{dashboardData?.confirmed_contribution_totals.reduce((sum, total) => sum + total.records_count, 0) ?? '—'}</div><div className="stat-foot muted">Confirmed records; not settlement proof</div></article>
     </section>
     <div className="content-grid">
-      <section className="panel activity-panel"><div className="panel-heading"><div><h2>Recent activity</h2><p>Your latest contribution and account events</p></div><button className="text-button" onClick={() => window.alert('Activity history will be available when the records API is connected.')}>View history <ArrowRight size={15} /></button></div>{dashboardData?.recent_contributions.length ? <div className="contribution-list">{dashboardData.recent_contributions.slice(0, 5).map(record => <div className="check-row" key={record.id}><span className="check-number">{record.status === 'confirmed' ? <CheckCircle2 size={17} /> : <CalendarClock size={17} />}</span><div><strong>{record.group?.name ?? `Group #${record.thrift_group_id}`}</strong><p>{new Date(record.created_at).toLocaleDateString()} · {record.status}</p></div><div className="contribution-amount"><strong>{new Intl.NumberFormat('en-NG', { style: 'currency', currency: record.currency_code }).format(record.amount_minor / 100)}</strong></div></div>)}</div> : <EmptyPanel icon={ArrowDownLeft} title="No contribution activity yet" body="Your contribution records will appear here when they exist in your groups." />}</section>
+      <section className="panel activity-panel"><div className="panel-heading"><div><h2>Recent activity</h2><p>Your latest contribution and account events</p></div><button className="text-button" onClick={() => { const url = new URL(window.location.href); url.searchParams.set('section', 'Statements'); window.history.pushState({}, '', url.pathname + url.search + url.hash); window.dispatchEvent(new PopStateEvent('popstate')); }}>View history <ArrowRight size={15} /></button></div>{dashboardData?.recent_contributions.length ? <div className="contribution-list">{dashboardData.recent_contributions.slice(0, 5).map(record => <div className="check-row" key={record.id}><span className="check-number">{record.status === 'confirmed' ? <CheckCircle2 size={17} /> : <CalendarClock size={17} />}</span><div><strong>{record.group?.name ?? `Group #${record.thrift_group_id}`}</strong><p>{new Date(record.created_at).toLocaleDateString()} · {record.status}</p></div><div className="contribution-amount"><strong>{new Intl.NumberFormat('en-NG', { style: 'currency', currency: record.currency_code }).format(record.amount_minor / 100)}</strong></div></div>)}</div> : <EmptyPanel icon={ArrowDownLeft} title="No contribution activity yet" body="Your contribution records will appear here when they exist in your groups." />}</section>
       <section className="panel next-panel"><div className="panel-heading"><div><h2>Upcoming contributions</h2><p>Scheduled due dates from your active groups</p></div></div>{dashboardData?.upcoming_obligations.length ? <div className="contribution-list">{dashboardData.upcoming_obligations.slice(0, 5).map(item => <div className="check-row" key={item.id}><span className="check-number"><CalendarClock size={17} /></span><div><strong>{item.group?.name ?? 'Thrift group'}</strong><p>Due {item.due_on ? new Date(`${item.due_on}T00:00:00`).toLocaleDateString() : 'date not set'}</p></div><div className="contribution-amount"><strong>{new Intl.NumberFormat('en-NG', { style: 'currency', currency: item.currency_code }).format(item.expected_amount_minor / 100)}</strong><small>Scheduled</small></div></div>)}</div> : <EmptyPanel icon={CalendarClock} title="No upcoming schedule loaded" body="Upcoming items appear after your organizer creates a schedule and generates due-date cycles. These entries do not initiate collections." />}</section>
     </div>
     <section className="panel assurance"><div className="assurance-icon"><ShieldCheck size={21} /></div><div><strong>Clear records. Accountable collections.</strong><p>Financial entries will clearly distinguish recorded collections, confirmed deposits and reconciled transactions.</p></div></section>
