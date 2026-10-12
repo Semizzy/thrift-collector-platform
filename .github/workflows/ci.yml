@@ -69,7 +69,7 @@ jobs:
         run: composer lint
 
       - name: Run domain tests
-        run: composer test
+        run: ./vendor/bin/phpunit --display-skipped
 
       - name: Verify Laravel boots and routes register
         run: php artisan route:list --except-vendor
@@ -194,7 +194,7 @@ jobs:
           LOG_CHANNEL: stderr
 
       - name: Run complete PHP test suite on MySQL 8
-        run: composer test
+        run: ./vendor/bin/phpunit --display-skipped
         env:
           APP_ENV: testing
           APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
