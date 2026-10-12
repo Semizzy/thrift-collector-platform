@@ -4,6 +4,13 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\PlatformAuditEvent;
+use App\Models\Business;
+use App\Models\ContributionRecord;
+use App\Models\ContributionRecordAdjustment;
+use App\Models\DepositIntent;
+use App\Models\PayoutRequest;
+use App\Models\ReconciliationBatch;
+use App\Models\ReconciliationEntry;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -216,7 +223,7 @@ class PlatformAdminController extends Controller
         $exceptions = ReconciliationEntry::query()
             ->join('reconciliation_batches', 'reconciliation_batches.id', '=', 'reconciliation_entries.reconciliation_batch_id')
             ->join('businesses', 'businesses.id', '=', 'reconciliation_batches.business_id')
-            ->whereIn('reconciliation_entries.status', ['unmatched', 'partial', 'conflict', 'duplicate', 'ignored'])
+            ->whereIn('reconciliation_entries.status', ['unmatched', 'partial', 'conflict', 'duplicate', 'ignore'])
             ->select(['reconciliation_entries.id', 'reconciliation_entries.reconciliation_batch_id',
                 'businesses.id as business_id', 'businesses.name as business_name',
                 'reconciliation_batches.source', 'reconciliation_batches.source_reference',
