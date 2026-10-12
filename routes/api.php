@@ -54,6 +54,14 @@ Route::prefix('v1')->group(function (): void {
                 ->middleware(RequirePlatformPermission::class.':platform.admins.manage');
             Route::get('/users', [PlatformAdminController::class, 'users'])
                 ->middleware(RequirePlatformPermission::class.':platform.users.view');
+            Route::get('/businesses', [PlatformAdminController::class, 'businesses'])
+                ->middleware(RequirePlatformPermission::class.':platform.businesses.view');
+            Route::get('/collections', [PlatformAdminController::class, 'collections'])
+                ->middleware(RequirePlatformPermission::class.':platform.collections.view');
+            Route::get('/reconciliation', [PlatformAdminController::class, 'reconciliation'])
+                ->middleware(RequirePlatformPermission::class.':platform.reconciliation.view');
+            Route::get('/approvals', [PlatformAdminController::class, 'approvals'])
+                ->middleware(RequirePlatformPermission::class.':platform.approvals.view');
             Route::get('/audit-events', [PlatformAdminController::class, 'auditEvents'])
                 ->middleware(RequirePlatformPermission::class.':platform.audit.view');
             Route::get('/security-settings', [PlatformAdminController::class, 'securitySettings'])
