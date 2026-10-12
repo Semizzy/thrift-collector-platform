@@ -172,7 +172,10 @@ final class ContributionCycleAndAdjustmentTest extends TestCase
                 'decision' => 'approved', 'decision_note' => 'Attempt to decide outside the group membership boundary.',
             ])->assertForbidden();
 
-        $this->assertDatabaseCount('wallet_ledger_transactions', 0);
+        // The original contribution journal exists, but no reversal has posted before approval.
+        $this->assertDatabaseCount('wallet_ledger_transactions', 1);
+        $this->assertDatabaseCount('wallet_ledger_entries', 2);
+        $this->assertSame(87500, app(WalletLedgerService::class)->balance((int) $business->id, (int) $owner->id, 'NGN'));
         $this->withToken($reviewerToken)->withHeader('X-Business-Id', (string) $business->id)
             ->postJson('/api/v1/business/groups/'.$group->id.'/adjustments/'.$adjustment->id.'/decide', [
                 'decision' => 'approved', 'decision_note' => 'Reviewed the evidence independently and approved the request.',
