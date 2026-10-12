@@ -47,7 +47,12 @@ class ContributionAdjustmentController extends Controller
         if ($data['adjustment_type'] === 'reversal' && isset($data['proposed_amount_minor'])) {
             return response()->json(['message' => 'A reversal request cannot set a replacement amount.'], 422);
         }
-        if ($record->status === 'reversed') return response()->json(['message' => 'This contribution record is already reversed.'], 409);
+        if ($record->status !== 'confirmed') {
+            return response()->json(['message' => 'Only confirmed contributions can be adjusted.'], 409);
+        }
+        if ($data['adjustment_type'] === 'correction' && (int) $data['proposed_amount_minor'] === (int) $record->amount_minor) {
+            return response()->json(['message' => 'The proposed correction must change the contribution amount.'], 422);
+        }
 
         $adjustment = DB::transaction(function () use ($request, $business, $record, $data) {
             $lockedRecord = ContributionRecord::query()->whereKey($record->id)->lockForUpdate()->firstOrFail();
