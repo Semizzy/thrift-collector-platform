@@ -11,9 +11,11 @@ class RequirePlatformPermission
     public function handle(Request $request, Closure $next, string $permission): Response
     {
         $user = $request->user();
-        $permissions = $user?->platform_permissions ?? [];
-        if (! $user || $user->platform_role !== 'admin' || ! is_array($permissions) || ! in_array($permission, $permissions, true)) {
-            return response()->json(['message' => 'Forbidden. The required platform permission is missing.'], 403);
+        // Platform administrators have full access across platform modules. The permission
+        // list remains useful for future delegated operator roles, but must not turn the
+        // primary admin account into a read-only or partially locked-out role.
+        if (! $user || $user->platform_role !== 'admin') {
+            return response()->json(['message' => 'Forbidden. Platform administrator access is required.'], 403);
         }
 
         return $next($request);
