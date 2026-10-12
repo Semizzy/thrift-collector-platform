@@ -149,7 +149,7 @@ final class ThriftDashboardAndPlatformAdminTest extends TestCase
         $this->withToken($token)->getJson('/api/v1/admin/security-settings')->assertOk();
     }
 
-    public function test_admin_cannot_provision_self_and_admin_without_permission_is_denied(): void
+    public function test_admin_cannot_provision_self_but_can_manage_other_admins_without_permission_allowlist(): void
     {
         $actor = User::query()->create([
             'name' => 'Restricted Admin', 'email' => 'restricted@example.test',
@@ -167,8 +167,12 @@ final class ThriftDashboardAndPlatformAdminTest extends TestCase
             'password' => 'a-strong-test-password',
         ]);
         $this->withToken($token)->postJson('/api/v1/admin/users/'.$target->id.'/provision', [
-            'platform_role' => 'admin', 'reason' => 'Attempt without permission.',
-        ])->assertForbidden();
-        $this->assertDatabaseMissing('platform_audit_events', ['subject_user_id' => $target->id]);
+            'platform_role' => 'admin', 'reason' => 'Full platform access granted to the approved operator.',
+        ])->assertOk();
+        $this->assertDatabaseHas('users', ['id' => $target->id, 'platform_role' => 'admin']);
+        $this->assertDatabaseHas('platform_audit_events', [
+            'actor_user_id' => $actor->id, 'subject_user_id' => $target->id,
+            'action' => 'platform_admin.provisioned',
+        ]);
     }
 }
