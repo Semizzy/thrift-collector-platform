@@ -74,7 +74,7 @@ final class DashboardAuthorizationTest extends TestCase
         $this->withToken($token)->getJson('/api/v1/admin/dashboard')->assertForbidden();
     }
 
-    public function test_platform_admin_without_required_dashboard_permission_is_forbidden(): void
+    public function test_platform_admin_has_full_dashboard_access_without_permission_allowlist(): void
     {
         $admin = User::query()->create([
             'name' => 'Restricted Platform Admin',
@@ -90,7 +90,8 @@ final class DashboardAuthorizationTest extends TestCase
             'expires_at' => now()->addDay(),
         ]);
 
-        $this->withToken($token)->getJson('/api/v1/admin/dashboard')->assertForbidden();
+        $this->withToken($token)->getJson('/api/v1/admin/dashboard')->assertOk()
+            ->assertJsonPath('data.status', 'authorized_full_access');
     }
 
     public function test_platform_admin_can_access_admin_dashboard_preview_api(): void
@@ -111,7 +112,7 @@ final class DashboardAuthorizationTest extends TestCase
 
         $this->withToken($token)->getJson('/api/v1/admin/dashboard')
             ->assertOk()
-            ->assertJsonPath('data.status', 'authorized_read_only')
+            ->assertJsonPath('data.status', 'authorized_full_access')
             ->assertJsonPath('data.financial_execution_enabled', false);
     }
 }
