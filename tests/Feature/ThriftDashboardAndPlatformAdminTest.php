@@ -161,12 +161,23 @@ final class ThriftDashboardAndPlatformAdminTest extends TestCase
             'name' => 'Admin Managed Business', 'slug' => 'admin-managed-business',
             'country_code' => 'NG', 'status' => 'active', 'created_by_user_id' => $actor->id,
         ]);
+        $group = ThriftGroup::query()->create([
+            'business_id' => $business->id, 'name' => 'Group Managed By Admin',
+            'currency_code' => 'NGN', 'status' => 'active', 'created_by_user_id' => $actor->id,
+        ]);
         $token = $this->tokenFor($actor, str_repeat('q', 64));
 
         $this->withToken($token)->withHeader('X-Business-Id', (string) $business->id)
             ->getJson('/api/v1/business/payments/gateways')
             ->assertOk()
             ->assertJsonPath('data.0.ready_for_live_execution', false);
+
+        $this->withToken($token)->withHeader('X-Business-Id', (string) $business->id)
+            ->getJson('/api/v1/business/groups')
+            ->assertOk()->assertJsonPath('data.data.0.id', $group->id);
+        $this->withToken($token)->withHeader('X-Business-Id', (string) $business->id)
+            ->getJson('/api/v1/business/groups/'.$group->id.'/contributions')
+            ->assertOk();
 
         $this->withToken($token)->withHeader('X-Business-Id', (string) $business->id)
             ->putJson('/api/v1/business/payments/gateways/manual/deposit', [
