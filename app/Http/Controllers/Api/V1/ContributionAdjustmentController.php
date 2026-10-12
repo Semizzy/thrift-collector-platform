@@ -7,6 +7,7 @@ use App\Models\BusinessAuditEvent;
 use App\Models\ContributionRecord;
 use App\Models\ContributionRecordAdjustment;
 use App\Models\ThriftGroup;
+use App\Services\WalletLedgerService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -109,6 +110,30 @@ class ContributionAdjustmentController extends Controller
                 return response()->json(['message' => 'Only pending adjustment requests can be decided.'], 409);
             }
 
+            if ($data['decision'] === 'approved' && $adjustment->adjustment_type === 'reversal') {
+                $record = ContributionRecord::query()->whereKey($adjustment->contribution_record_id)
+                    ->lockForUpdate()->firstOrFail();
+                if ($record->status !== 'confirmed') {
+                    return response()->json(['message' => 'Only a confirmed contribution can be reversed.'], 409);
+                }
+
+                $posting = app(WalletLedgerService::class)->reverseContribution(
+                    (int) $business->id, (int) $record->id, (int) $adjustment->id, (int) $request->user()->id,
+                );
+                if (! in_array($posting['status'], ['posted', 'already_posted'], true)) {
+                    $message = match ($posting['status']) {
+                        'insufficient_balance' => 'The member wallet no longer has enough funds for this reversal. The adjustment remains pending.',
+                        'original_posting_not_found' => 'The original contribution wallet journal was not found. The adjustment remains pending.',
+                        'already_reversed' => 'This contribution has already been reversed by another adjustment.',
+                        'original_journal_invalid' => 'The original journal failed integrity checks. The adjustment remains pending for investigation.',
+                        'currency_mismatch' => 'The original journal currency does not match the contribution currency.',
+                        default => 'The contribution cannot be reversed safely. The adjustment remains pending.',
+                    };
+                    return response()->json(['message' => $message, 'posting_status' => $posting['status']], 409);
+                }
+                $record->forceFill(['status' => 'reversed'])->save();
+            }
+
             $adjustment->forceFill([
                 'status' => $data['decision'], 'decided_by_user_id' => $request->user()->id,
                 'decided_at' => now(), 'decision_note' => trim($data['decision_note']),
@@ -117,11 +142,11 @@ class ContributionAdjustmentController extends Controller
             BusinessAuditEvent::query()->create([
                 'business_id' => $business->id, 'actor_user_id' => $request->user()->id,
                 'action' => 'contribution_adjustment.'.$data['decision'], 'subject_type' => 'contribution_record_adjustment', 'subject_id' => $adjustment->id,
-                'metadata' => ['record_id' => $adjustment->contribution_record_id, 'requester_user_id' => $adjustment->requested_by_user_id, 'type' => $adjustment->adjustment_type, 'reason' => $adjustment->reason, 'decision_note' => $adjustment->decision_note, 'note' => 'Approval records a decision only; it does not mutate the original record or post a ledger entry.'],
+                'metadata' => ['record_id' => $adjustment->contribution_record_id, 'requester_user_id' => $adjustment->requested_by_user_id, 'type' => $adjustment->adjustment_type, 'reason' => $adjustment->reason, 'decision_note' => $adjustment->decision_note, 'note' => $adjustment->adjustment_type === 'reversal' && $data['decision'] === 'approved' ? 'A balanced inverse ledger journal was posted; the original journal remains immutable.' : 'Decision records an adjustment outcome; no ledger posting was performed.'],
                 'ip_address' => $request->ip(), 'user_agent' => Str::limit((string) $request->userAgent(), 500, ''), 'created_at' => now(),
             ]);
 
-            return response()->json(['data' => $adjustment, 'message' => 'Decision recorded. The original record remains unchanged; no ledger or payment action was performed.']);
+            return response()->json(['data' => $adjustment, 'message' => $adjustment->adjustment_type === 'reversal' && $data['decision'] === 'approved' ? 'Reversal approved and posted as a balanced inverse journal. The original journal is retained.' : 'Decision recorded. No ledger or payment action was performed.']);
         });
 
         return $result;
