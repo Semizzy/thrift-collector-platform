@@ -96,6 +96,8 @@ Route::prefix('v1')->group(function (): void {
                 ->middleware(RequireBusinessPermission::class.':reconciliation.manage');
             Route::post('/payments/provider-deposits/{eventId}/review', [PaystackWebhookController::class, 'reviewDepositEvent'])
                 ->whereNumber('eventId')->middleware(RequireBusinessPermission::class.':reconciliation.manage');
+            Route::post('/payments/provider-deposits/{eventId}/requery', [PaystackWebhookController::class, 'requeryDepositEvent'])
+                ->whereNumber('eventId')->middleware([RequireBusinessPermission::class.':reconciliation.manage', 'throttle:10,1']);
             Route::get('/payments/deposit-accounts/banks', [UserDepositAccountController::class, 'availableBanks'])
                 ->middleware('throttle:30,1');
             Route::post('/payments/deposit-accounts', [UserDepositAccountController::class, 'requestAccount'])
