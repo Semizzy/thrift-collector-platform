@@ -95,6 +95,30 @@ class PlatformAdminController extends Controller
         ], 'message' => 'Login lockout policy updated and audited.']);
     }
 
+    public function users(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'q' => ['sometimes', 'string', 'max:100'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        $query = User::query()
+            ->select(['id', 'name', 'email', 'email_verified_at', 'platform_role', 'created_at'])
+            ->orderByDesc('id');
+
+        $term = trim((string) ($data['q'] ?? ''));
+        if ($term !== '') {
+            $query->where(function ($builder) use ($term): void {
+                $builder->where('name', 'like', '%'.$term.'%')
+                    ->orWhere('email', 'like', '%'.$term.'%');
+            });
+        }
+
+        return response()->json([
+            'data' => $query->paginate((int) ($data['per_page'] ?? 25)),
+        ]);
+    }
+
     public function auditEvents(): JsonResponse
     {
         return response()->json(['data' => PlatformAuditEvent::query()
