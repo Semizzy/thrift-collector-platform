@@ -337,4 +337,29 @@ final class ApiAuthenticationTest extends TestCase
 
         $this->withToken($token)->getJson('/api/v1/auth/me')->assertUnauthorized();
     }
+
+    public function test_logout_revokes_the_presented_token_immediately(): void
+    {
+        $user = User::query()->create([
+            'name' => 'Logout Token User',
+            'email' => 'logout-token@example.test',
+            'password' => 'a-strong-test-password',
+        ]);
+        $plainToken = str_repeat('l', 64);
+        PersonalAccessToken::query()->create([
+            'user_id' => $user->id,
+            'name' => 'logout-test',
+            'token_hash' => hash('sha256', $plainToken),
+            'expires_at' => now()->addDay(),
+        ]);
+
+        $this->withToken($plainToken)->postJson('/api/v1/auth/logout')
+            ->assertOk()->assertJsonPath('message', 'Signed out.');
+
+        $this->assertDatabaseMissing('personal_access_tokens', [
+            'user_id' => $user->id,
+            'token_hash' => hash('sha256', $plainToken),
+        ]);
+        $this->withToken($plainToken)->getJson('/api/v1/auth/me')->assertUnauthorized();
+    }
 }
