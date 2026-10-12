@@ -16,24 +16,23 @@ class AdminDashboardController extends Controller
 {
     public function summary(Request $request): JsonResponse
     {
-        $permissions = $request->user()->platform_permissions ?? [];
-        $recentAudit = is_array($permissions) && in_array('platform.audit.view', $permissions, true)
-            ? PlatformAuditEvent::query()
-                ->with(['actor:id,name', 'subject:id,name'])
-                ->orderByDesc('created_at')->limit(10)->get()
-                ->map(static fn (PlatformAuditEvent $event): array => [
+        $recentAudit = PlatformAuditEvent::query()
+            ->with(['actor:id,name', 'subject:id,name'])
+            ->orderByDesc('created_at')->limit(10)->get()
+            ->map(static fn (PlatformAuditEvent $event): array => [
                 'id' => $event->id,
                 'action' => $event->action,
                 'actor_name' => $event->actor?->name,
                 'subject_name' => $event->subject?->name,
                 'created_at' => $event->created_at,
-            ])
-            : collect();
+            ]);
 
         return response()->json([
             'data' => [
                 'administrator' => $request->user()->only(['id', 'name', 'email']),
-                'status' => 'authorized_read_only',
+                'status' => 'authorized_full_access',
+                'access_mode' => 'full_platform_admin',
+                'available_modules' => ['members', 'businesses', 'thrift_groups', 'contributions', 'adjustments_and_reversals', 'wallet_ledger', 'deposits_and_payouts', 'provider_configuration', 'reconciliation', 'security_settings', 'administrator_management', 'audit_events'],
                 'metrics' => [
                     'registered_members' => User::query()->count(),
                     'active_businesses' => Business::query()->where('status', 'active')->count(),
@@ -43,7 +42,7 @@ class AdminDashboardController extends Controller
                 ],
                 'recent_audit_events' => $recentAudit,
                 'financial_execution_enabled' => false,
-                'message' => 'Read-only operational counts. No financial execution, ledger posting, payout, or provider settlement actions are available from this endpoint.',
+                'message' => 'Full platform administrator access is enabled. Real-money execution and provider settlement remain independently release-gated until financial integrity and deployment evidence are approved.',
             ],
         ]);
     }
