@@ -113,33 +113,56 @@ class ContributionAdjustmentController extends Controller
             $record = ContributionRecord::query()->whereKey($adjustment->contribution_record_id)
                 ->lockForUpdate()->firstOrFail();
 
-            if ($data['decision'] === 'approved' && $adjustment->adjustment_type === 'reversal') {
+            $posting = null;
+            if ($data['decision'] === 'approved') {
                 if ($record->status !== 'confirmed') {
-                    return response()->json(['message' => 'Only a confirmed contribution can be reversed.'], 409);
+                    return response()->json(['message' => 'Only a confirmed contribution can be adjusted.'], 409);
                 }
 
-                $posting = $ledger->reverseContribution(
-                    (int) $business->id,
-                    (int) $record->user_id,
-                    (string) $record->currency_code,
-                    (int) $record->amount_minor,
-                    (int) $record->id,
-                    (int) $request->user()->id,
-                    trim($data['decision_note'])
-                );
-
-                if ($posting['status'] === 'insufficient_balance') {
-                    return response()->json([
-                        'message' => 'This reversal cannot be approved because the member wallet no longer contains the full contribution amount. Reconcile the balance before retrying.',
-                        'code' => 'contribution_reversal_insufficient_balance',
-                    ], 409);
+                if ($adjustment->adjustment_type === 'reversal') {
+                    $posting = $ledger->reverseContribution(
+                        (int) $business->id,
+                        (int) $record->user_id,
+                        (string) $record->currency_code,
+                        (int) $record->amount_minor,
+                        (int) $record->id,
+                        (int) $request->user()->id,
+                        trim($data['decision_note'])
+                    );
+                    if ($posting['status'] === 'insufficient_balance') {
+                        return response()->json([
+                            'message' => 'This reversal cannot be approved because the member wallet no longer contains the full contribution amount. Reconcile the balance before retrying.',
+                            'code' => 'contribution_reversal_insufficient_balance',
+                        ], 409);
+                    }
+                    $record->forceFill(['status' => 'reversed'])->save();
+                } elseif ($adjustment->adjustment_type === 'correction') {
+                    $newAmount = (int) $adjustment->proposed_amount_minor;
+                    $oldAmount = (int) $record->amount_minor;
+                    if ($newAmount === $oldAmount) {
+                        return response()->json(['message' => 'The proposed correction does not change the contribution amount.'], 422);
+                    }
+                    $posting = $ledger->correctContribution(
+                        (int) $business->id,
+                        (int) $record->user_id,
+                        (string) $record->currency_code,
+                        $oldAmount,
+                        $newAmount,
+                        (int) $record->id,
+                        (int) $adjustment->id,
+                        (int) $request->user()->id,
+                        trim($data['decision_note'])
+                    );
+                    if ($posting['status'] === 'insufficient_balance') {
+                        return response()->json([
+                            'message' => 'This correction cannot be approved because the member wallet lacks the amount required for the correction. Reconcile the balance before retrying.',
+                            'code' => 'contribution_correction_insufficient_balance',
+                        ], 409);
+                    }
+                    $record->forceFill(['amount_minor' => $newAmount])->save();
                 }
-
-                $record->forceFill(['status' => 'reversed'])->save();
             }
 
-            // Correction approvals remain decision-only until an audited correction posting
-            // workflow exists. Never silently change the original amount or ledger.
             $adjustment->forceFill([
                 'status' => $data['decision'], 'decided_by_user_id' => $request->user()->id,
                 'decided_at' => now(), 'decision_note' => trim($data['decision_note']),
@@ -154,11 +177,15 @@ class ContributionAdjustmentController extends Controller
                     'type' => $adjustment->adjustment_type,
                     'reason' => $adjustment->reason,
                     'decision_note' => $adjustment->decision_note,
-                    'ledger_transaction_id' => $data['decision'] === 'approved' && $adjustment->adjustment_type === 'reversal' ? ($posting['transaction_id'] ?? null) : null,
+                    'ledger_transaction_id' => $data['decision'] === 'approved' ? ($posting['transaction_id'] ?? null) : null,
                     'record_status_after_decision' => $record->fresh()->status,
+                    'amount_minor_before' => (int) $record->getOriginal('amount_minor'),
+                    'amount_minor_after' => (int) $record->fresh()->amount_minor,
                     'note' => $data['decision'] === 'approved' && $adjustment->adjustment_type === 'reversal'
                         ? 'Approved reversal posted to the double-entry ledger; the contribution is marked reversed.'
-                        : 'Decision audited. No correction amount or payment was silently changed.',
+                        : ($data['decision'] === 'approved' && $adjustment->adjustment_type === 'correction'
+                            ? 'Approved amount correction posted as a balanced double-entry journal.'
+                            : 'Decision recorded without financial posting.'),
                 ],
                 'ip_address' => $request->ip(), 'user_agent' => Str::limit((string) $request->userAgent(), 500, ''), 'created_at' => now(),
             ]);
@@ -167,7 +194,9 @@ class ContributionAdjustmentController extends Controller
                 'data' => $adjustment->fresh(),
                 'message' => $data['decision'] === 'approved' && $adjustment->adjustment_type === 'reversal'
                     ? 'Reversal approved and posted to the double-entry ledger.'
-                    : 'Decision recorded. No correction amount or payment was silently changed.',
+                    : ($data['decision'] === 'approved' && $adjustment->adjustment_type === 'correction'
+                        ? 'Correction approved and posted to the double-entry ledger.'
+                        : 'Decision recorded.'),
             ]);
         });
 
