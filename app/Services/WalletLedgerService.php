@@ -84,13 +84,32 @@ class WalletLedgerService
                 ->where('e.wallet_ledger_transaction_id', $original->id)
                 ->orderBy('a.account_key')
                 ->get(['a.account_key', 'a.account_type', 'a.user_id', 'a.normal_balance', 'a.currency_code', 'e.direction', 'e.amount_minor']);
-            if ($originalLines->count() < 2) {
+            // Contribution credits have a strict two-account shape. Do not reverse a merely
+            // balanced journal if its account ownership, directions, or amounts were corrupted.
+            if ($originalLines->count() !== 2) {
                 return ['status' => 'original_journal_invalid', 'transaction_id' => null];
             }
 
             $debits = (int) $originalLines->where('direction', 'debit')->sum('amount_minor');
             $credits = (int) $originalLines->where('direction', 'credit')->sum('amount_minor');
-            if ($debits !== $credits || $debits !== (int) $contribution->amount_minor) {
+            $clearingLines = $originalLines->filter(fn ($line) =>
+                $line->account_type === 'contribution_clearing'
+                && $line->account_key === $this->systemKey('contribution-clearing', $contribution->currency_code)
+                && $line->direction === 'debit'
+                && $line->normal_balance === 'debit'
+                && (int) $line->amount_minor === (int) $contribution->amount_minor
+                && $line->user_id === null
+            );
+            $walletLines = $originalLines->filter(fn ($line) =>
+                $line->account_type === 'member_wallet'
+                && $line->account_key === $this->walletKey((int) $contribution->user_id, $contribution->currency_code)
+                && (int) $line->user_id === (int) $contribution->user_id
+                && $line->direction === 'credit'
+                && $line->normal_balance === 'credit'
+                && (int) $line->amount_minor === (int) $contribution->amount_minor
+            );
+            if ($debits !== $credits || $debits !== (int) $contribution->amount_minor
+                || $clearingLines->count() !== 1 || $walletLines->count() !== 1) {
                 return ['status' => 'original_journal_invalid', 'transaction_id' => null];
             }
 
