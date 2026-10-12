@@ -21,7 +21,7 @@ Required posting contract before implementation is enabled:
 - Add database-enforced uniqueness, foreign keys, positive-amount and currency constraints where supported. The application-level balanced-journal check is not a substitute for schema constraints or tests.
 - Add tests for same-actor rejection, double approval, repeated jobs, conflicting idempotency payloads, over-reversal, cross-business IDs, currency mismatch, rollback after injected failure, and concurrent duplicate posting.
 
-**Current known limitation:** the existing adjustment workflow explicitly records approval without ledger posting. Do not describe it as a completed financial reversal.
+**Current implementation on this draft branch:** approving a reversal invokes `WalletLedgerService::reverseContribution()` inside the decision transaction. It locks the confirmed contribution and original journal, validates balanced original entries and currency, posts a separate inverse journal with the stable key `contribution:{id}:wallet-reversal`, preserves the original journal, and marks the contribution reversed only after a successful posting. The feature and independent-connection MySQL race tests are present. Remaining cases still requiring explicit coverage include injected mid-post rollback, conflicting adjustment IDs for an existing reversal, corrupted/missing wallet-line scenarios, and broader cross-business/currency mismatch cases. Treat the gate as incomplete until those tests and the full CI run pass.
 
 ## 2. Double-entry, precision and concurrency gates
 
@@ -49,17 +49,32 @@ Provider-specific sandbox evidence, signed webhook tests, status requery and rec
 ## 4. Authorization, maker-checker and audit gates
 
 - Every business money route must require authenticated, verified access and an active membership in the exact business; cross-business IDs must return no data and cause no mutation.
-- Enforce role permissions on the server, not just navigation/UI. Platform-wide oversight remains read-only unless a separate explicit permission and audited workflow is reviewed.
+- Enforce role permissions on the server, not just navigation/UI. Platform administrators have platform-wide access to admin modules and business-scoped modules without being forced into ordinary business memberships or per-module allowlists. Privileged writes through business-scoped routes are recorded in the business audit trail; each target financial/security workflow must also record its own decision and outcome. Maker-checker and self-approval restrictions remain mandatory.
 - The requester must not approve their own deposit evidence, payout, adjustment, refund, or privileged account change. Test alternate tokens, inactive memberships, revoked/expired tokens and stale authorization.
 - Logout revokes the presented API token. Test that the same token immediately fails after logout/revocation and that expired tokens are rejected.
 - Append audit events for request, decision, posting, reversal, provider event quarantine, reconciliation decision and privileged access. Redact passwords, tokens, provider secrets, full account numbers and raw sensitive payloads.
 - Audit evidence must include actor, business, subject/reference, decision/reason, timestamp, and safe request context. Financial audit history must not be silently editable by ordinary application roles.
 
-## 5. cPanel release procedure (staging first)
+## 5. Artifact inspection record — 2026-10-12
+
+The CI artifact was downloaded and inspected for commit `ff55ac57acb6a2dac5a4533d438797c28e7e6d35` from workflow run `38240237545`.
+
+- GitHub artifact: `semizzy-thrift-deployment`, artifact ID `11742837866`, reported size `6,167,031` bytes.
+- Downloaded outer artifact SHA-256: `bdd62ff251838df0ad60f8e18589dbc358e8e3c879ffbe51b986839d44f1d99d` (matches the GitHub artifact digest).
+- The outer artifact contains `semizzy-thrift-deployment.zip`; inner deployment ZIP SHA-256: `775c960d8ddb98aae07da45afda231fbe31767a0e6627d1dcf175fb03656c05f`.
+- Inner ZIP passed `unzip -t`; it contains 6,484 entries, including application source, migrations, docs, `vendor/`, `artisan`, `composer.json`, `composer.lock`, `.env.example`, `public/app/index.html`, and compiled assets under `public/app/assets/`.
+- The deployment package did not contain a live `.env`, `.git/`, `node_modules/`, tests, customer database dumps, or the live logs. `.env.example` is intentionally included.
+- The expected frontend location is `public/app/`; this package does not use `public/build/manifest.json`.
+- Artifact retention expiry shown by GitHub: 2026-10-26. Re-download and verify the checksum if using a later copy; do not assume a previously copied ZIP is identical.
+
+**What this inspection proves:** the CI artifact exists, its reported digest matches the downloaded outer ZIP, the nested deployment ZIP is structurally valid, and the expected compiled frontend entry point/assets are packaged.
+
+**What this inspection does not prove:** cPanel upload success, staging boot/smoke tests, production environment correctness, database backup integrity, restore success, rollback success, provider sandbox verification, or authorization to enable real-money operations. No backup/restore drill or cPanel staging deployment has been performed as part of this inspection.
+## 6. cPanel release procedure (staging first)
 
 ### Before uploading
 
-- Confirm the exact release commit and inspect the generated deployment ZIP contents. Verify public/build/manifest.json and every referenced production asset are present; do not deploy a source-only ZIP when the frontend needs a compiled build.
+- Confirm the exact release commit and inspect the generated deployment ZIP contents. This application’s compiled frontend is `public/app/index.html` plus the files it references under `public/app/assets/` (not `public/build/manifest.json`). Verify the HTML and every referenced production asset are present; do not deploy a source-only ZIP.
 - Verify the artifact has no .env, credentials, private keys, local database dumps, customer data, node_modules, or development-only secrets.
 - Record the artifact checksum, commit SHA, workflow run URL, migration list and current application version in the release record.
 - Confirm the cPanel document root points only to the Laravel public directory; keep application code, .env, backups and logs outside public web access.
