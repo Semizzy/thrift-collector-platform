@@ -149,6 +149,45 @@ final class ThriftDashboardAndPlatformAdminTest extends TestCase
         $this->withToken($token)->getJson('/api/v1/admin/security-settings')->assertOk();
     }
 
+    public function test_platform_admin_can_manage_business_modules_without_membership_and_access_is_audited(): void
+    {
+        $this->seed();
+        $actor = User::query()->create([
+            'name' => 'Cross-Business Administrator', 'email' => 'cross-business-admin@example.test',
+            'password' => 'a-strong-test-password', 'email_verified_at' => now(),
+        ]);
+        $actor->forceFill(['platform_role' => 'admin', 'platform_permissions' => []])->save();
+        $business = Business::query()->create([
+            'name' => 'Admin Managed Business', 'slug' => 'admin-managed-business',
+            'country_code' => 'NG', 'status' => 'active', 'created_by_user_id' => $actor->id,
+        ]);
+        $token = $this->tokenFor($actor, str_repeat('q', 64));
+
+        $this->withToken($token)->withHeader('X-Business-Id', (string) $business->id)
+            ->getJson('/api/v1/business/payments/gateways')
+            ->assertOk()
+            ->assertJsonPath('data.0.ready_for_live_execution', false);
+
+        $this->withToken($token)->withHeader('X-Business-Id', (string) $business->id)
+            ->putJson('/api/v1/business/payments/gateways/manual/deposit', [
+                'public_config' => ['label' => 'Admin-managed manual review'],
+            ])->assertOk()->assertJsonPath('data.status', 'disabled');
+
+        $this->assertDatabaseHas('business_audit_events', [
+            'business_id' => $business->id,
+            'actor_user_id' => $actor->id,
+            'action' => 'platform_admin.business_operation_attempted',
+        ]);
+        $this->assertDatabaseHas('payment_operation_events', [
+            'business_id' => $business->id,
+            'actor_user_id' => $actor->id,
+            'event' => 'gateway_configured_disabled',
+        ]);
+        $this->assertDatabaseMissing('business_memberships', [
+            'business_id' => $business->id, 'user_id' => $actor->id,
+        ]);
+    }
+
     public function test_admin_cannot_provision_self_but_can_manage_other_admins_without_permission_allowlist(): void
     {
         $actor = User::query()->create([
