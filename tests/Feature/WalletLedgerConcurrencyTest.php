@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Models\Business;
+use App\Models\ContributionRecord;
+use App\Models\ThriftGroup;
 use App\Models\User;
 use App\Services\WalletLedgerService;
 use Illuminate\Foundation\Testing\DatabaseMigrations;
@@ -89,6 +91,91 @@ final class WalletLedgerConcurrencyTest extends TestCase
             ->where('e.direction', 'debit')->where('e.wallet_account_id', $walletAccountId)->count());
 
         $this->assertEveryJournalBalances();
+    }
+
+    public function test_two_independent_mysql_connections_post_only_one_contribution_reversal(): void
+    {
+        if (DB::getDriverName() !== 'mysql' || ! function_exists('pcntl_fork')) {
+            $this->markTestSkipped('This integration test requires MySQL and pcntl process support.');
+        }
+
+        $group = ThriftGroup::query()->create([
+            'business_id' => $this->businessId, 'name' => 'Reversal Race Group',
+            'currency_code' => 'NGN', 'status' => 'active', 'created_by_user_id' => $this->userId,
+        ]);
+        $record = ContributionRecord::query()->create([
+            'thrift_group_id' => $group->id, 'user_id' => $this->userId,
+            'recorded_by_user_id' => $this->actorId, 'amount_minor' => 2500,
+            'currency_code' => 'NGN', 'status' => 'confirmed', 'collection_method' => 'cash',
+            'confirmed_by_user_id' => $this->actorId, 'confirmed_at' => now(),
+        ]);
+        app(WalletLedgerService::class)->creditContribution(
+            $this->businessId, $this->userId, 'NGN', 2500, (int) $record->id, $this->actorId,
+        );
+
+        $results = $this->runConcurrentReversals((int) $record->id, 990301);
+        $statuses = array_column($results, 'status');
+        sort($statuses);
+        self::assertSame(['already_posted', 'posted'], $statuses);
+        self::assertSame(10000, app(WalletLedgerService::class)->balance($this->businessId, $this->userId, 'NGN'));
+        self::assertSame(1, DB::table('wallet_ledger_transactions')->where('business_id', $this->businessId)
+            ->where('idempotency_key', 'contribution:'.$record->id.':wallet-reversal')->count());
+        $this->assertEveryJournalBalances();
+    }
+
+    private function runConcurrentReversals(int $contributionId, int $adjustmentId): array
+    {
+        $prefix = sys_get_temp_dir().'/wallet-reversal-race-'.bin2hex(random_bytes(8));
+        $gate = $prefix.'-go';
+        $children = [];
+        foreach ([0, 1] as $index) {
+            $ready = $prefix.'-ready-'.$index;
+            $result = $prefix.'-result-'.$index;
+            $pid = pcntl_fork();
+            if ($pid === -1) throw new \\RuntimeException('Could not fork a reversal worker.');
+            if ($pid === 0) {
+                try {
+                    file_put_contents($ready, 'ready', LOCK_EX);
+                    $deadline = microtime(true) + 15;
+                    while (! is_file($gate) && microtime(true) < $deadline) usleep(1000);
+                    if (! is_file($gate)) throw new \\RuntimeException('Timed out waiting for reversal start gate.');
+                    DB::purge();
+                    DB::reconnect();
+                    $posting = app(WalletLedgerService::class)->reverseContribution(
+                        $this->businessId, $contributionId, $adjustmentId, $this->actorId,
+                    );
+                    file_put_contents($result, json_encode($posting, JSON_THROW_ON_ERROR), LOCK_EX);
+                    exit(0);
+                } catch (\\Throwable $exception) {
+                    file_put_contents($result, json_encode(['error' => $exception->getMessage()], JSON_THROW_ON_ERROR), LOCK_EX);
+                    exit(1);
+                }
+            }
+            $children[] = ['pid' => $pid, 'ready' => $ready, 'result' => $result];
+        }
+
+        $deadline = microtime(true) + 15;
+        foreach ($children as $child) {
+            while (! is_file($child['ready']) && microtime(true) < $deadline) usleep(1000);
+            if (! is_file($child['ready'])) {
+                @touch($gate);
+                throw new \\RuntimeException('Reversal worker did not reach the start barrier.');
+            }
+        }
+        touch($gate);
+        $results = [];
+        foreach ($children as $child) {
+            pcntl_waitpid($child['pid'], $status);
+            $raw = is_file($child['result']) ? file_get_contents($child['result']) : false;
+            if (! is_string($raw)) throw new \\RuntimeException('Reversal worker did not write a result.');
+            $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+            if (isset($decoded['error'])) throw new \\RuntimeException('Reversal worker failed: '.$decoded['error']);
+            $results[] = $decoded;
+            @unlink($child['ready']);
+            @unlink($child['result']);
+        }
+        @unlink($gate);
+        return $results;
     }
 
     private function runConcurrentDebits(array $payoutIds, array $amounts): array
