@@ -9,7 +9,9 @@ use App\Models\PersonalAccessToken;
 use App\Models\ThriftGroup;
 use App\Models\ThriftGroupMembership;
 use App\Models\User;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 final class ReconciliationTest extends TestCase
@@ -104,4 +106,71 @@ final class ReconciliationTest extends TestCase
         ]);
         $this->assertDatabaseHas('contribution_records', ['id' => $record->id, 'amount_minor' => 9000, 'status' => 'confirmed']);
     }
+
+    public function test_database_rejects_mutation_or_deletion_of_imported_reconciliation_evidence(): void
+    {
+        [, $business, , $token] = $this->fixture();
+        $response = $this->withToken($token)->withHeader('X-Business-Id', (string) $business->id)
+            ->postJson('/api/v1/business/reconciliation/batches', [
+                'source' => 'bank_statement', 'source_reference' => 'immutable-file-003', 'currency_code' => 'NGN',
+                'entries' => [[
+                    'source_transaction_id' => 'bank-tx-immutable', 'reference' => 'REF-IMMUTABLE',
+                    'amount_minor' => 7100, 'occurred_at' => now()->toDateTimeString(),
+                ]],
+            ])->assertCreated();
+
+        $entryId = $response->json('data.entries.0.id');
+        try {
+            DB::table('reconciliation_entries')->where('id', $entryId)->update(['amount_minor' => 1]);
+            $this->fail('The database must reject edits to imported financial evidence.');
+        } catch (QueryException $exception) {
+            $this->assertStringContainsString('immutable', strtolower($exception->getMessage()));
+        }
+
+        try {
+            DB::table('reconciliation_entries')->where('id', $entryId)->delete();
+            $this->fail('The database must reject deletion of imported financial evidence.');
+        } catch (QueryException $exception) {
+            $this->assertStringContainsString('cannot be deleted', strtolower($exception->getMessage()));
+        }
+
+        // Review state is allowed to change; the imported evidence is not.
+        DB::table('reconciliation_entries')->where('id', $entryId)->update(['status' => 'conflict']);
+        $this->assertDatabaseHas('reconciliation_entries', ['id' => $entryId, 'amount_minor' => 7100, 'status' => 'conflict']);
+    }
+
+    public function test_database_makes_reconciliation_decisions_append_only(): void
+    {
+        [, $business, , $token] = $this->fixture();
+        $response = $this->withToken($token)->withHeader('X-Business-Id', (string) $business->id)
+            ->postJson('/api/v1/business/reconciliation/batches', [
+                'source' => 'bank_statement', 'source_reference' => 'decision-file-004', 'currency_code' => 'NGN',
+                'entries' => [[
+                    'source_transaction_id' => 'bank-tx-decision', 'reference' => 'REF-DECISION',
+                    'amount_minor' => 8200,
+                ]],
+            ])->assertCreated();
+        $entryId = $response->json('data.entries.0.id');
+        $decisionId = DB::table('reconciliation_decisions')->insertGetId([
+            'business_id' => $business->id, 'reconciliation_entry_id' => $entryId,
+            'actor_user_id' => $business->created_by_user_id, 'decision' => 'conflict',
+            'reason' => 'Statement evidence requires a separate manual review.',
+            'evidence' => json_encode(['source' => 'test'], JSON_THROW_ON_ERROR), 'created_at' => now(),
+        ]);
+
+        try {
+            DB::table('reconciliation_decisions')->where('id', $decisionId)->update(['reason' => 'rewritten decision']);
+            $this->fail('The database must reject edits to historical reconciliation decisions.');
+        } catch (QueryException $exception) {
+            $this->assertStringContainsString('append-only', strtolower($exception->getMessage()));
+        }
+
+        try {
+            DB::table('reconciliation_decisions')->where('id', $decisionId)->delete();
+            $this->fail('The database must reject deletion of historical reconciliation decisions.');
+        } catch (QueryException $exception) {
+            $this->assertStringContainsString('append-only', strtolower($exception->getMessage()));
+        }
+    }
+
 }
