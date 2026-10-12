@@ -113,6 +113,7 @@ class ContributionAdjustmentController extends Controller
             $record = ContributionRecord::query()->whereKey($adjustment->contribution_record_id)
                 ->lockForUpdate()->firstOrFail();
 
+            $amountBefore = (int) $record->amount_minor;
             $posting = null;
             if ($data['decision'] === 'approved') {
                 if ($record->status !== 'confirmed') {
@@ -179,7 +180,7 @@ class ContributionAdjustmentController extends Controller
                     'decision_note' => $adjustment->decision_note,
                     'ledger_transaction_id' => $data['decision'] === 'approved' ? ($posting['transaction_id'] ?? null) : null,
                     'record_status_after_decision' => $record->fresh()->status,
-                    'amount_minor_before' => (int) $record->getOriginal('amount_minor'),
+                    'amount_minor_before' => $amountBefore,
                     'amount_minor_after' => (int) $record->fresh()->amount_minor,
                     'note' => $data['decision'] === 'approved' && $adjustment->adjustment_type === 'reversal'
                         ? 'Approved reversal posted to the double-entry ledger; the contribution is marked reversed.'
