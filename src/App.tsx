@@ -475,7 +475,7 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   }
 
   useEffect(() => {
-    if (!token || !selectedBusinessId || !['Wallet', 'Overview', 'Deposit & payout'].includes(active)) return;
+    if (!token || !selectedBusinessId || !['Wallet', 'Overview', 'Deposit & payout', 'Statements'].includes(active)) return;
     let cancelled = false;
     setWalletLoading(true); setWalletError('');
     const country = dashboardData?.workspaces.find(workspace => String(workspace.id) === selectedBusinessId)?.country_code;
@@ -491,7 +491,7 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   }, [token, selectedBusinessId, active, walletRefreshKey, dashboardData]);
 
   useEffect(() => {
-    if (!token || !selectedBusinessId || active !== 'Deposit & payout') return;
+    if (!token || !selectedBusinessId || !['Deposit & payout', 'Statements'].includes(active)) return;
     let cancelled = false;
     setPaymentLoading(true); setPaymentError('');
     const headers = { Authorization: 'Bearer ' + token, Accept: 'application/json', 'X-Business-Id': selectedBusinessId };
