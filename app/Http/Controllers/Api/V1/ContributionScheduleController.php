@@ -20,9 +20,11 @@ class ContributionScheduleController extends Controller
     public function index(Request $request, int $groupId): JsonResponse
     {
         $business = $request->attributes->get('current_business');
-        $group = ThriftGroup::query()->where('business_id', $business->id)->whereKey($groupId)
-            ->whereHas('memberships', fn ($query) => $query->where('user_id', $request->user()->id)->where('status', 'active'))
-            ->firstOrFail();
+        $groupQuery = ThriftGroup::query()->where('business_id', $business->id)->whereKey($groupId);
+        if ($request->user()->platform_role !== 'admin') {
+            $groupQuery->whereHas('memberships', fn ($members) => $members->where('user_id', $request->user()->id)->where('status', 'active'));
+        }
+        $group = $groupQuery->firstOrFail();
 
         return response()->json(['data' => ContributionSchedule::query()->where('thrift_group_id', $group->id)
             ->withCount('cycles')->orderByDesc('created_at')->paginate(25)]);
@@ -31,10 +33,11 @@ class ContributionScheduleController extends Controller
     public function store(Request $request, int $groupId): JsonResponse
     {
         $business = $request->attributes->get('current_business');
-        $group = ThriftGroup::query()->where('business_id', $business->id)->whereKey($groupId)
-            ->where('status', 'active')
-            ->whereHas('memberships', fn ($query) => $query->where('user_id', $request->user()->id)->where('status', 'active'))
-            ->firstOrFail();
+        $groupQuery = ThriftGroup::query()->where('business_id', $business->id)->whereKey($groupId)->where('status', 'active');
+        if ($request->user()->platform_role !== 'admin') {
+            $groupQuery->whereHas('memberships', fn ($members) => $members->where('user_id', $request->user()->id)->where('status', 'active'));
+        }
+        $group = $groupQuery->firstOrFail();
 
         $data = $request->validate([
             'name' => ['required', 'string', 'min:2', 'max:160'],
@@ -70,9 +73,12 @@ class ContributionScheduleController extends Controller
         $business = $request->attributes->get('current_business');
         $schedule = ContributionSchedule::query()->whereKey($scheduleId)
             ->where('thrift_group_id', $groupId)
-            ->whereHas('group', fn ($query) => $query->where('business_id', $business->id)
-                ->whereHas('memberships', fn ($members) => $members->where('user_id', $request->user()->id)->where('status', 'active')))
-            ->firstOrFail();
+            ->whereHas('group', function ($query) use ($business, $request): void {
+                $query->where('business_id', $business->id);
+                if ($request->user()->platform_role !== 'admin') {
+                    $query->whereHas('memberships', fn ($members) => $members->where('user_id', $request->user()->id)->where('status', 'active'));
+                }
+            })->firstOrFail();
 
         if ($schedule->status !== 'active') {
             return response()->json(['message' => 'Only active schedules can generate cycles.'], 409);
@@ -147,9 +153,11 @@ class ContributionScheduleController extends Controller
     public function cycles(Request $request, int $groupId): JsonResponse
     {
         $business = $request->attributes->get('current_business');
-        $group = ThriftGroup::query()->where('business_id', $business->id)->whereKey($groupId)
-            ->whereHas('memberships', fn ($query) => $query->where('user_id', $request->user()->id)->where('status', 'active'))
-            ->firstOrFail();
+        $groupQuery = ThriftGroup::query()->where('business_id', $business->id)->whereKey($groupId);
+        if ($request->user()->platform_role !== 'admin') {
+            $groupQuery->whereHas('memberships', fn ($members) => $members->where('user_id', $request->user()->id)->where('status', 'active'));
+        }
+        $group = $groupQuery->firstOrFail();
 
         $query = ContributionCycle::query()->where('thrift_group_id', $group->id)->with('schedule:id,name,frequency')->withCount('obligations')
             ->orderBy('due_on');
