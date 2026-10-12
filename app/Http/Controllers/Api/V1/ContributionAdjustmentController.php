@@ -19,9 +19,11 @@ class ContributionAdjustmentController extends Controller
     public function index(Request $request, int $groupId): JsonResponse
     {
         $business = $request->attributes->get('current_business');
-        $group = ThriftGroup::query()->where('business_id', $business->id)->whereKey($groupId)
-            ->whereHas('memberships', fn ($query) => $query->where('user_id', $request->user()->id)->where('status', 'active'))
-            ->firstOrFail();
+        $groupQuery = ThriftGroup::query()->where('business_id', $business->id)->whereKey($groupId);
+        if ($request->user()->platform_role !== 'admin') {
+            $groupQuery->whereHas('memberships', fn ($members) => $members->where('user_id', $request->user()->id)->where('status', 'active'));
+        }
+        $group = $groupQuery->firstOrFail();
 
         return response()->json(['data' => ContributionRecordAdjustment::query()->where('thrift_group_id', $group->id)
             ->with(['contribution:id,amount_minor,currency_code,status', 'requester:id,name', 'decider:id,name'])
@@ -32,9 +34,12 @@ class ContributionAdjustmentController extends Controller
     {
         $business = $request->attributes->get('current_business');
         $record = ContributionRecord::query()->whereKey($recordId)->where('thrift_group_id', $groupId)
-            ->whereHas('group', fn ($query) => $query->where('business_id', $business->id)
-                ->whereHas('memberships', fn ($members) => $members->where('user_id', $request->user()->id)->where('status', 'active')))
-            ->firstOrFail();
+            ->whereHas('group', function ($query) use ($business, $request): void {
+                $query->where('business_id', $business->id);
+                if ($request->user()->platform_role !== 'admin') {
+                    $query->whereHas('memberships', fn ($members) => $members->where('user_id', $request->user()->id)->where('status', 'active'));
+                }
+            })->firstOrFail();
 
         $data = $request->validate([
             'adjustment_type' => ['required', Rule::in(['correction', 'reversal'])],
@@ -100,7 +105,7 @@ class ContributionAdjustmentController extends Controller
                 ->where('user_id', $request->user()->id)
                 ->where('status', 'active')
                 ->exists();
-            if (! $isActiveGroupMember) {
+            if (! $isActiveGroupMember && $request->user()->platform_role !== 'admin') {
                 return response()->json(['message' => 'Active membership in this thrift group is required to decide an adjustment.'], 403);
             }
             if ($adjustment->requested_by_user_id === $request->user()->id) {
