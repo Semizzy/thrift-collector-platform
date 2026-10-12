@@ -74,6 +74,8 @@ SQL);
             DB::unprepared("CREATE TRIGGER reconciliation_decisions_no_update BEFORE UPDATE ON reconciliation_decisions FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Reconciliation decisions are append-only'");
             DB::unprepared("CREATE TRIGGER reconciliation_decisions_no_delete BEFORE DELETE ON reconciliation_decisions FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Reconciliation decisions are append-only'");
             DB::unprepared("CREATE TRIGGER reconciliation_batches_source_immutable_update BEFORE UPDATE ON reconciliation_batches FOR EACH ROW BEGIN IF NOT (OLD.business_id <=> NEW.business_id) OR NOT (OLD.source <=> NEW.source) OR NOT (OLD.source_reference <=> NEW.source_reference) OR NOT (OLD.currency_code <=> NEW.currency_code) OR NOT (OLD.created_by_user_id <=> NEW.created_by_user_id) OR NOT (OLD.created_at <=> NEW.created_at) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Reconciliation batch source identity is immutable'; END IF; END");
+        } else {
+            throw new RuntimeException('Reconciliation evidence immutability requires supported SQLite or MySQL triggers.');
         }
     }
 
