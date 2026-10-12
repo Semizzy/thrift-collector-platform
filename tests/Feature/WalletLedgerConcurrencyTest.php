@@ -277,7 +277,7 @@ final class WalletLedgerConcurrencyTest extends TestCase
         DB::listen(static function ($query) use (&$injected): void {
             if (! $injected && str_starts_with(strtolower(ltrim($query->sql)), 'insert into `wallet_ledger_entries`')) {
                 $injected = true;
-                throw new RuntimeException('Injected failure after a ledger entry insert.');
+                throw new \RuntimeException('Injected failure after a ledger entry insert.');
             }
         });
 
@@ -300,6 +300,10 @@ final class WalletLedgerConcurrencyTest extends TestCase
 
     public function test_wallet_balance_and_journal_are_isolated_by_business_and_currency(): void
     {
+        if (DB::getDriverName() !== 'mysql' || ! function_exists('pcntl_fork')) {
+            $this->markTestSkipped('This integration test requires MySQL and pcntl process support.');
+        }
+
         $otherBusiness = Business::query()->create([
             'name' => 'Other Isolation Business', 'slug' => 'other-isolation-business',
             'country_code' => 'NG', 'status' => 'active', 'created_by_user_id' => $this->userId,
@@ -326,6 +330,10 @@ final class WalletLedgerConcurrencyTest extends TestCase
 
     public function test_insufficient_withdrawal_does_not_create_partial_journal(): void
     {
+        if (DB::getDriverName() !== 'mysql' || ! function_exists('pcntl_fork')) {
+            $this->markTestSkipped('This integration test requires MySQL and pcntl process support.');
+        }
+
         $beforeTransactions = DB::table('wallet_ledger_transactions')->where('business_id', $this->businessId)->count();
         $beforeEntries = DB::table('wallet_ledger_entries as e')
             ->join('wallet_ledger_transactions as t', 't.id', '=', 'e.wallet_ledger_transaction_id')
