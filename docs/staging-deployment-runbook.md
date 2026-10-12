@@ -4,9 +4,9 @@ This runbook is for a **separate, non-production cPanel staging site**. Passing 
 
 ## 1. Release identity and guardrails
 
-- Candidate branch: `ci/mysql8-wallet-concurrency-gate`
-- Candidate commit at runbook creation: `6c50562234a23dac6e83a8d07c5d3a98e76dd682` (recheck the PR head before using an artifact; documentation fixes create a newer commit).
-- Pull request: https://github.com/Semizzy/thrift-collector-platform/pull/1
+- Candidate branch: `feat/production-readiness-gate`
+- Candidate commit: use the exact current head SHA shown on PR #8 and verify that every required CI job passed for that SHA immediately before selecting an artifact. Documentation changes create a newer commit and artifact; never use an artifact from an earlier run.
+- Pull request: https://github.com/Semizzy/thrift-collector-platform/pull/8
 - Keep the PR in draft until the code review, staging smoke tests, and required CI checks are complete.
 - Do not merge or deploy to production as part of this runbook.
 - Do not enter real customer records, real payment credentials, or real payout destinations. Live provider execution must remain disabled.
