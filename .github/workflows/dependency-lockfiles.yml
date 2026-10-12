@@ -95,3 +95,12 @@ jobs:
           fi
           echo "Composer audit outcome: ${COMPOSER_AUDIT_OUTCOME}"
           echo "npm audit outcome: ${NPM_AUDIT_OUTCOME}"
+
+      - name: Fail release gate when dependency audits fail
+        if: always()
+        env:
+          COMPOSER_AUDIT_OUTCOME: ${{ steps.composer-audit.outcome }}
+          NPM_AUDIT_OUTCOME: ${{ steps.npm-audit.outcome }}
+        run: |
+          test "${COMPOSER_AUDIT_OUTCOME}" = "success"
+          test "${NPM_AUDIT_OUTCOME}" = "success"
