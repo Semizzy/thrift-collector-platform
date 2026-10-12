@@ -129,6 +129,26 @@ final class ThriftDashboardAndPlatformAdminTest extends TestCase
         ]);
     }
 
+    public function test_platform_admin_has_full_admin_module_access_without_permission_allowlists(): void
+    {
+        $actor = User::query()->create([
+            'name' => 'Full Access Administrator', 'email' => 'full-admin@example.test',
+            'password' => 'a-strong-test-password',
+        ]);
+        $actor->forceFill(['platform_role' => 'admin', 'platform_permissions' => []])->save();
+        $token = $this->tokenFor($actor, str_repeat('z', 64));
+
+        $this->withToken($token)->getJson('/api/v1/admin/dashboard')
+            ->assertOk()
+            ->assertJsonPath('data.status', 'authorized_full_access')
+            ->assertJsonPath('data.access_mode', 'full_platform_admin')
+            ->assertJsonPath('data.financial_execution_enabled', false)
+            ->assertJsonPath('data.available_modules.0', 'members');
+
+        $this->withToken($token)->getJson('/api/v1/admin/audit-events')->assertOk();
+        $this->withToken($token)->getJson('/api/v1/admin/security-settings')->assertOk();
+    }
+
     public function test_admin_cannot_provision_self_and_admin_without_permission_is_denied(): void
     {
         $actor = User::query()->create([
