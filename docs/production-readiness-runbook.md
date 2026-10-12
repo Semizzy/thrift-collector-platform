@@ -59,7 +59,7 @@ Provider-specific sandbox evidence, signed webhook tests, status requery and rec
 
 ### Before uploading
 
-- Confirm the exact release commit and inspect the generated deployment ZIP contents. Verify public/build/manifest.json and every referenced production asset are present; do not deploy a source-only ZIP when the frontend needs a compiled build.
+- Confirm the exact release commit and inspect the generated deployment ZIP contents. This project builds its frontend to `public/app/` with Vite base `/app/`; verify `public/app/index.html` and every referenced file under `public/app/assets/` are present. Do not require `public/build/manifest.json` unless the Vite output configuration is deliberately changed. Never deploy a source-only ZIP when the frontend needs compiled assets.
 - Verify the artifact has no .env, credentials, private keys, local database dumps, customer data, node_modules, or development-only secrets.
 - Record the artifact checksum, commit SHA, workflow run URL, migration list and current application version in the release record.
 - Confirm the cPanel document root points only to the Laravel public directory; keep application code, .env, backups and logs outside public web access.
