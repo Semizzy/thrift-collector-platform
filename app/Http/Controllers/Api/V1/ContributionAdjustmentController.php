@@ -95,7 +95,7 @@ class ContributionAdjustmentController extends Controller
             'decision_note' => ['required', 'string', 'min:8', 'max:500'],
         ]);
 
-        $result = DB::transaction(function () use ($request, $business, $groupId, $adjustmentId, $data) {
+        $result = DB::transaction(function () use ($request, $business, $groupId, $adjustmentId, $data, $ledger) {
             $adjustment = ContributionRecordAdjustment::query()->whereKey($adjustmentId)
                 ->where('thrift_group_id', $groupId)
                 ->whereHas('group', fn ($query) => $query->where('business_id', $business->id))
