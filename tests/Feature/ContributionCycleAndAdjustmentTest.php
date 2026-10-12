@@ -214,9 +214,10 @@ final class ContributionCycleAndAdjustmentTest extends TestCase
                 'decision' => 'approved', 'decision_note' => 'Evidence reviewed independently before decision.',
             ])->assertStatus(409)->assertJsonPath('code', 'contribution_reversal_insufficient_balance');
 
-        $this->assertDatabaseHas('contribution_records', ['id' => $record->id, 'status' => 'confirmed']);
+        $this->assertDatabaseHas('contribution_records', ['id' => $record->id, 'status' => 'confirmed', 'amount_minor' => 87500]);
         $this->assertDatabaseHas('contribution_record_adjustments', ['id' => $adjustment->id, 'status' => 'pending']);
         $this->assertDatabaseCount('wallet_ledger_transactions', 0);
+        $this->assertDatabaseCount('wallet_ledger_entries', 0);
     }
 
 
