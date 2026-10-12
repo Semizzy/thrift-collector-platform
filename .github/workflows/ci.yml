@@ -141,6 +141,9 @@ jobs:
           done
           mysql -h 127.0.0.1 -P 3306 -uthrift_test -pthrift_test_password -Nse "SELECT VERSION()" | grep -E '^8\.0\.'
 
+      - name: Allow trigger creation in disposable MySQL CI database
+        run: mysql -h 127.0.0.1 -P 3306 -uroot -proot -e "SET GLOBAL log_bin_trust_function_creators = 1"
+
       - name: Run all migrations and seed the disposable MySQL database
         run: php artisan migrate:fresh --seed --force
         env:
