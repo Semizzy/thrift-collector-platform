@@ -558,9 +558,13 @@ final class PaymentWorkflowTest extends TestCase
 
     public function test_atomic_wallet_debit_guard_rolls_back_journal_when_balance_changes_during_withdrawal(): void
     {
-        $driver = DB::getDriverName();
-        if (! in_array($driver, ['sqlite', 'mysql'], true)) {
-            $this->markTestSkipped('This race-injection test requires SQLite or MySQL trigger support.');
+        // MySQL CREATE/DROP TRIGGER implicitly commits the active transaction.
+        // RefreshDatabase wraps this test in a transaction, so trigger DDL would
+        // destroy Laravel's savepoint and invalidate the test harness. Keep this
+        // trigger-injection test on SQLite; MySQL's conditional debit and locking
+        // behavior is exercised by the competing-withdrawals integration test.
+        if (DB::getDriverName() !== 'sqlite') {
+            $this->markTestSkipped('Trigger-injection requires SQLite: MySQL trigger DDL implicitly commits the RefreshDatabase transaction.');
         }
 
         [$owner, $reviewer, $business] = $this->fixture();
@@ -568,19 +572,11 @@ final class PaymentWorkflowTest extends TestCase
         $ledger->creditContribution((int) $business->id, (int) $owner->id, 'NGN', 10000, 90010, (int) $reviewer->id);
 
         $walletKey = 'wallet:'.$owner->id.':NGN';
-        if ($driver === 'sqlite') {
-            DB::unprepared(
-                "CREATE TRIGGER simulate_wallet_debit_race BEFORE UPDATE OF balance_minor ON wallet_accounts ".
-                "WHEN OLD.account_key = '".$walletKey."' AND NEW.balance_minor < OLD.balance_minor ".
-                "BEGIN SELECT RAISE(IGNORE); END"
-            );
-        } else {
-            DB::unprepared(
-                "CREATE TRIGGER simulate_wallet_debit_race BEFORE UPDATE ON wallet_accounts FOR EACH ROW ".
-                "BEGIN IF OLD.account_key = '".$walletKey."' AND NEW.balance_minor < OLD.balance_minor ".
-                "THEN SET NEW.balance_minor = OLD.balance_minor; END IF; END"
-            );
-        }
+        DB::unprepared(
+            "CREATE TRIGGER simulate_wallet_debit_race BEFORE UPDATE OF balance_minor ON wallet_accounts ".
+            "WHEN OLD.account_key = '".$walletKey."' AND NEW.balance_minor < OLD.balance_minor ".
+            "BEGIN SELECT RAISE(IGNORE); END"
+        );
 
         try {
             $posting = $ledger->debitWithdrawal((int) $business->id, (int) $owner->id, 'NGN', 6000, 90011, (int) $reviewer->id);
