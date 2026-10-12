@@ -34,8 +34,20 @@ class RequireBusinessMembership
         }
 
         // Platform admins may operate across business-scoped modules without being
-        // artificially enrolled as ordinary business members. Their privileged writes
-        // are recorded separately in the business audit trail.
+        // artificially enrolled as ordinary business members. A non-persisted owner-like
+        // context supports existing controller workflows that inspect the actor's role;
+        // it is never saved as a real business membership.
+        if (! $membership && $isPlatformAdmin) {
+            $membership = (new BusinessMembership())->forceFill([
+                'business_id' => $business->id,
+                'user_id' => $request->user()->getAuthIdentifier(),
+                'role' => 'business_owner',
+                'status' => 'active',
+                'joined_at' => now(),
+                'is_platform_admin' => true,
+            ]);
+        }
+
         $request->attributes->set('current_business', $business);
         $request->attributes->set('business_membership', $membership);
         $request->attributes->set('platform_admin_business_access', $isPlatformAdmin);
