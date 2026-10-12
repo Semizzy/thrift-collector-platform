@@ -298,6 +298,13 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
   const [groupCreating, setGroupCreating] = useState(false);
   const [groupFeedback, setGroupFeedback] = useState('');
   const [groupError, setGroupError] = useState('');
+  const [adjustmentRecordId, setAdjustmentRecordId] = useState('');
+  const [adjustmentType, setAdjustmentType] = useState<'correction' | 'reversal'>('correction');
+  const [adjustmentAmount, setAdjustmentAmount] = useState('');
+  const [adjustmentReason, setAdjustmentReason] = useState('');
+  const [adjustmentSubmitting, setAdjustmentSubmitting] = useState(false);
+  const [adjustmentFeedback, setAdjustmentFeedback] = useState('');
+  const [adjustmentError, setAdjustmentError] = useState('');
 
   useEffect(() => {
     if (!token) { setAuthLoading(false); setProfile(null); setDashboardData(null); return; }
@@ -640,6 +647,28 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
     }
   }
 
+  async function submitContributionAdjustment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const selectedRecord = dashboardData?.recent_contributions.find(record => String(record.id) === adjustmentRecordId);
+    if (!token || !selectedBusinessId || !selectedRecord) { setAdjustmentError('Choose a contribution record from your account first.'); return; }
+    setAdjustmentSubmitting(true); setAdjustmentFeedback(''); setAdjustmentError('');
+    try {
+      const payload: { adjustment_type: 'correction' | 'reversal'; reason: string; proposed_amount_minor?: number } = { adjustment_type: adjustmentType, reason: adjustmentReason.trim() };
+      if (adjustmentType === 'correction') payload.proposed_amount_minor = Math.round(Number(adjustmentAmount) * 100);
+      const response = await fetch(`/api/v1/business/groups/${selectedRecord.thrift_group_id}/contributions/${selectedRecord.id}/adjustments`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'Content-Type': 'application/json', 'X-Business-Id': selectedBusinessId },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json() as { message?: string; errors?: Record<string, string[]> };
+      if (!response.ok) throw new Error(result.message ?? Object.values(result.errors ?? {}).flat()[0] ?? 'Could not submit the adjustment request. Check your group permissions.');
+      setAdjustmentFeedback(result.message ?? 'Adjustment request submitted for independent review.');
+      setAdjustmentReason(''); setAdjustmentAmount('');
+    } catch (cause) {
+      setAdjustmentError(cause instanceof Error ? cause.message : 'Could not submit the adjustment request.');
+    } finally { setAdjustmentSubmitting(false); }
+  }
+
   async function createThriftGroup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!token || !selectedBusinessId) { setGroupError('Choose an active business workspace before creating a group.'); return; }
@@ -859,6 +888,18 @@ function UserDashboard({ active, onReviewerAccessChange }: { active: string; onR
     <section className="panel"><div className="panel-heading"><div><h2>Deposit and payout requests</h2><p>Request status from the payment workflow API.</p></div><button className="text-button" onClick={() => setPaymentRefreshKey(value => value + 1)}><RefreshCw size={14} /> Refresh</button></div>
       {paymentLoading ? <p className="muted">Loading payment requests…</p> : <><h3>Deposits</h3>{depositRequests.length ? <div className="payment-history">{depositRequests.map(item => <PaymentHistoryRow key={'statement-deposit-'+item.id} item={item} />)}</div> : <p className="muted">No deposit requests.</p>}<h3>Payouts</h3>{payoutRequests.length ? <div className="payment-history">{payoutRequests.map(item => <PaymentHistoryRow key={'statement-payout-'+item.id} item={item} />)}</div> : <p className="muted">No payout requests.</p>}</>}
     </section></>;
+
+  if (active === 'Support & disputes') return <><SectionHeading eyebrow="MEMBER WORKSPACE · CONTRIBUTION CORRECTIONS" title="Support & disputes" description="Submit an auditable correction or reversal request for a contribution record. Requests do not change the original record or move money automatically." />
+    <section className="panel"><div className="panel-heading"><div><h2>Request a contribution review</h2><p>Another authorized group member must review the request; you cannot approve your own request.</p></div><CircleHelp size={22} /></div>
+      {!dashboardData?.recent_contributions.length ? <EmptyPanel icon={FileText} title="No contribution records available" body="A review request can be made after a contribution record appears in your account." /> : <form className="pin-form" onSubmit={submitContributionAdjustment}>
+        <label htmlFor="adjustment-record">Contribution record</label><select id="adjustment-record" required value={adjustmentRecordId} onChange={event => setAdjustmentRecordId(event.target.value)}><option value="">Choose a contribution record</option>{dashboardData.recent_contributions.map(record => <option key={record.id} value={String(record.id)}>#{record.id} · {record.group?.name ?? `Group #${record.thrift_group_id}`} · {new Intl.NumberFormat('en-NG', { style: 'currency', currency: record.currency_code }).format(record.amount_minor / 100)} · {record.status}</option>)}</select>
+        <label htmlFor="adjustment-type">Request type</label><select id="adjustment-type" value={adjustmentType} onChange={event => setAdjustmentType(event.target.value as 'correction' | 'reversal')}><option value="correction">Correction · propose a replacement amount</option><option value="reversal">Reversal · request that this record be reversed</option></select>
+        {adjustmentType === 'correction' && <><label htmlFor="adjustment-amount">Proposed corrected amount</label><input id="adjustment-amount" type="number" min="0.01" step="0.01" required value={adjustmentAmount} onChange={event => setAdjustmentAmount(event.target.value)} /></>}
+        <label htmlFor="adjustment-reason">Reason for review</label><textarea id="adjustment-reason" required minLength={8} maxLength={500} value={adjustmentReason} onChange={event => setAdjustmentReason(event.target.value)} placeholder="Explain the discrepancy and the evidence available." />
+        {adjustmentError && <p className="auth-error" role="alert">{adjustmentError}</p>}{adjustmentFeedback && <p className="account-success" role="status">{adjustmentFeedback}</p>}
+        <button className="button button-primary" type="submit" disabled={adjustmentSubmitting || !adjustmentRecordId || !adjustmentReason.trim() || (adjustmentType === 'correction' && (!adjustmentAmount || Number(adjustmentAmount) <= 0))}>{adjustmentSubmitting ? 'Submitting request…' : 'Submit for independent review'}</button>
+      </form>}
+    </section><section className="panel security-note"><div className="assurance-icon"><ShieldCheck size={21} /></div><div><strong>Original records are protected</strong><p>The API records the request and audit event. It does not silently overwrite the original contribution or post a financial adjustment.</p></div></section></>;
 
   if (active === 'Deposit review') return <><SectionHeading eyebrow="BUSINESS WORKSPACE · AUTHORIZED REVIEWERS" title="Deposit review" description="Independently review provider notifications and record an auditable evidence decision." />{providerDepositReviewPanel}</>;
 
