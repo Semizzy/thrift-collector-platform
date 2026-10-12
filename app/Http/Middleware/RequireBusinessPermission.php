@@ -15,8 +15,7 @@ class RequireBusinessPermission
 
         // Platform administrator access spans business-scoped modules and does not
         // depend on an ordinary membership or a per-module permission allowlist.
-        if ($request->user()?->platform_role === 'admin'
-            && $request->attributes->get('platform_admin_business_access') === true) {
+        if ($request->user()?->platform_role === 'admin') {
             return $next($request);
         }
 
