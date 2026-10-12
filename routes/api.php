@@ -52,6 +52,8 @@ Route::prefix('v1')->group(function (): void {
             Route::post('/users/{userId}/provision', [PlatformAdminController::class, 'provision'])
                 ->whereNumber('userId')
                 ->middleware(RequirePlatformPermission::class.':platform.admins.manage');
+            Route::get('/users', [PlatformAdminController::class, 'users'])
+                ->middleware(RequirePlatformPermission::class.':platform.users.view');
             Route::get('/audit-events', [PlatformAdminController::class, 'auditEvents'])
                 ->middleware(RequirePlatformPermission::class.':platform.audit.view');
             Route::get('/security-settings', [PlatformAdminController::class, 'securitySettings'])
