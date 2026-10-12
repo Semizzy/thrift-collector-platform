@@ -8,7 +8,7 @@ Until the production-readiness issue is explicitly signed off, run this applicat
 
 ## 1. Ledger and contribution-adjustment design gate
 
-Contribution adjustment approval must remain a decision record only until a separately reviewed posting implementation is merged. Do not mutate a posted contribution row or rewrite prior ledger entries.
+Reversal approval on this draft branch posts a balanced inverse journal inside the decision transaction; the original journal remains immutable. Corrections remain decision records unless a separately reviewed correction-posting implementation is added. Never overwrite posted journal entries or rewrite financial history; a contribution record may be marked reversed only after its inverse journal commits.
 
 Required posting contract before implementation is enabled:
 
@@ -21,7 +21,7 @@ Required posting contract before implementation is enabled:
 - Add database-enforced uniqueness, foreign keys, positive-amount and currency constraints where supported. The application-level balanced-journal check is not a substitute for schema constraints or tests.
 - Add tests for same-actor rejection, double approval, repeated jobs, conflicting idempotency payloads, over-reversal, cross-business IDs, currency mismatch, rollback after injected failure, and concurrent duplicate posting.
 
-**Current implementation on this draft branch:** approving a reversal invokes `WalletLedgerService::reverseContribution()` inside the decision transaction. It locks the confirmed contribution and original journal, validates balanced original entries and currency, posts a separate inverse journal with the stable key `contribution:{id}:wallet-reversal`, preserves the original journal, and marks the contribution reversed only after a successful posting. The feature and independent-connection MySQL race tests are present. Remaining cases still requiring explicit coverage include injected mid-post rollback, conflicting adjustment IDs for an existing reversal, corrupted/missing wallet-line scenarios, and broader cross-business/currency mismatch cases. Treat the gate as incomplete until those tests and the full CI run pass.
+**Current implementation on this draft branch:** approving a reversal invokes `WalletLedgerService::reverseContribution()` inside the decision transaction. It locks the confirmed contribution and original journal, validates balanced original entries and currency, posts a separate inverse journal with the stable key `contribution:{id}:wallet-reversal`, preserves the original journal, and marks the contribution reversed only after a successful posting. Independent-connection MySQL race coverage and injected journal-entry-write failure/transaction-rollback coverage are present; the complete MySQL 8 PHP test suite passed in CI run [#85](https://github.com/Semizzy/thrift-collector-platform/actions/runs/38244418883) on commit `78e00056d3b5c5646a2d3334217b0a5eeda743c1`. Remaining cases still requiring explicit coverage include conflicting adjustment IDs for an existing reversal, corrupted/missing wallet-line scenarios, and broader cross-business/account/currency mismatch cases. Keep the release gate incomplete until these remaining cases and staging/recovery evidence are reviewed.
 
 ## 2. Double-entry, precision and concurrency gates
 
