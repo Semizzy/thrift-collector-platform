@@ -42,6 +42,20 @@ class WalletLedgerService
             ], $actorId);
     }
 
+    public function reverseContribution(int $businessId, int $userId, string $currency, int $amount, int $contributionId, ?int $actorId, string $reason): array
+    {
+        if (trim($reason) === '') {
+            throw new InvalidArgumentException('A contribution reversal requires an audited reason.');
+        }
+
+        return $this->post($businessId, $currency, 'contribution_record', $contributionId,
+            'contribution:'.$contributionId.':wallet-reversal', 'Confirmed contribution reversal: '.trim($reason),
+            [
+                ['key' => $this->walletKey($userId, $currency), 'type' => 'member_wallet', 'user_id' => $userId, 'normal' => 'credit', 'direction' => 'debit', 'amount' => $amount],
+                ['key' => $this->systemKey('contribution-clearing', $currency), 'type' => 'contribution_clearing', 'user_id' => null, 'normal' => 'debit', 'direction' => 'credit', 'amount' => $amount],
+            ], $actorId, $this->walletKey($userId, $currency), ['reversal_reason' => trim($reason)]);
+    }
+
     public function debitWithdrawal(int $businessId, int $userId, string $currency, int $amount, int $payoutId, ?int $actorId): array
     {
         return $this->post($businessId, $currency, 'payout_request', $payoutId,
