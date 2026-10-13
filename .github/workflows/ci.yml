@@ -214,6 +214,8 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [frontend-build, domain-tests, mysql8-wallet-gate]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Check out main
         uses: actions/checkout@v4
