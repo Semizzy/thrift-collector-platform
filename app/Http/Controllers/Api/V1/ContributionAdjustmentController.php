@@ -7,6 +7,7 @@ use App\Models\BusinessAuditEvent;
 use App\Models\ContributionRecord;
 use App\Models\ContributionRecordAdjustment;
 use App\Models\ThriftGroup;
+use App\Services\WalletLedgerService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -46,7 +47,12 @@ class ContributionAdjustmentController extends Controller
         if ($data['adjustment_type'] === 'reversal' && isset($data['proposed_amount_minor'])) {
             return response()->json(['message' => 'A reversal request cannot set a replacement amount.'], 422);
         }
-        if ($record->status === 'reversed') return response()->json(['message' => 'This contribution record is already reversed.'], 409);
+        if ($record->status !== 'confirmed') {
+            return response()->json(['message' => 'Only confirmed contributions can be adjusted.'], 409);
+        }
+        if ($data['adjustment_type'] === 'correction' && (int) $data['proposed_amount_minor'] === (int) $record->amount_minor) {
+            return response()->json(['message' => 'The proposed correction must change the contribution amount.'], 422);
+        }
 
         $adjustment = DB::transaction(function () use ($request, $business, $record, $data) {
             $lockedRecord = ContributionRecord::query()->whereKey($record->id)->lockForUpdate()->firstOrFail();
@@ -81,7 +87,7 @@ class ContributionAdjustmentController extends Controller
         return response()->json(['data' => $adjustment, 'message' => 'Adjustment request recorded for independent review. Original contribution data is unchanged.'], 201);
     }
 
-    public function decide(Request $request, int $groupId, int $adjustmentId): JsonResponse
+    public function decide(Request $request, int $groupId, int $adjustmentId, WalletLedgerService $ledger): JsonResponse
     {
         $business = $request->attributes->get('current_business');
         $data = $request->validate([
@@ -89,7 +95,7 @@ class ContributionAdjustmentController extends Controller
             'decision_note' => ['required', 'string', 'min:8', 'max:500'],
         ]);
 
-        $result = DB::transaction(function () use ($request, $business, $groupId, $adjustmentId, $data) {
+        $result = DB::transaction(function () use ($request, $business, $groupId, $adjustmentId, $data, $ledger) {
             $adjustment = ContributionRecordAdjustment::query()->whereKey($adjustmentId)
                 ->where('thrift_group_id', $groupId)
                 ->whereHas('group', fn ($query) => $query->where('business_id', $business->id))
@@ -109,6 +115,37 @@ class ContributionAdjustmentController extends Controller
                 return response()->json(['message' => 'Only pending adjustment requests can be decided.'], 409);
             }
 
+            $record = ContributionRecord::query()->whereKey($adjustment->contribution_record_id)
+                ->lockForUpdate()->firstOrFail();
+
+            $amountBefore = (int) $record->amount_minor;
+            $posting = null;
+            if ($data['decision'] === 'approved') {
+                if ($record->status !== 'confirmed') {
+                    return response()->json(['message' => 'Only a confirmed contribution can be adjusted.'], 409);
+                }
+
+                if ($adjustment->adjustment_type === 'reversal') {
+                    $posting = $ledger->reverseContribution(
+                        (int) $business->id,
+                        (int) $record->id,
+                        (int) $adjustment->id,
+                        (int) $request->user()->id
+                    );
+                    if (! in_array($posting['status'], ['posted', 'already_posted'], true)) {
+                        return response()->json([
+                            'message' => 'The contribution reversal could not be safely posted. The adjustment remains pending for reconciliation.',
+                            'posting_status' => $posting['status'],
+                        ], 409);
+                    }
+                    $record->forceFill(['status' => 'reversed'])->save();
+                } elseif ($adjustment->adjustment_type === 'correction') {
+                    // Approval is a review decision only until the correction posting flow
+                    // has its own independently reviewed, idempotent ledger implementation.
+                    $posting = null;
+                }
+            }
+
             $adjustment->forceFill([
                 'status' => $data['decision'], 'decided_by_user_id' => $request->user()->id,
                 'decided_at' => now(), 'decision_note' => trim($data['decision_note']),
@@ -117,11 +154,33 @@ class ContributionAdjustmentController extends Controller
             BusinessAuditEvent::query()->create([
                 'business_id' => $business->id, 'actor_user_id' => $request->user()->id,
                 'action' => 'contribution_adjustment.'.$data['decision'], 'subject_type' => 'contribution_record_adjustment', 'subject_id' => $adjustment->id,
-                'metadata' => ['record_id' => $adjustment->contribution_record_id, 'requester_user_id' => $adjustment->requested_by_user_id, 'type' => $adjustment->adjustment_type, 'reason' => $adjustment->reason, 'decision_note' => $adjustment->decision_note, 'note' => 'Approval records a decision only; it does not mutate the original record or post a ledger entry.'],
+                'metadata' => [
+                    'record_id' => $adjustment->contribution_record_id,
+                    'requester_user_id' => $adjustment->requested_by_user_id,
+                    'type' => $adjustment->adjustment_type,
+                    'reason' => $adjustment->reason,
+                    'decision_note' => $adjustment->decision_note,
+                    'ledger_transaction_id' => $data['decision'] === 'approved' ? ($posting['transaction_id'] ?? null) : null,
+                    'record_status_after_decision' => $record->fresh()->status,
+                    'amount_minor_before' => $amountBefore,
+                    'amount_minor_after' => (int) $record->fresh()->amount_minor,
+                    'note' => $data['decision'] === 'approved' && $adjustment->adjustment_type === 'reversal'
+                        ? 'Approved reversal posted to the double-entry ledger; the contribution is marked reversed.'
+                        : ($data['decision'] === 'approved' && $adjustment->adjustment_type === 'correction'
+                            ? 'Correction decision recorded; no financial posting was performed.'
+                            : 'Decision recorded without financial posting.'),
+                ],
                 'ip_address' => $request->ip(), 'user_agent' => Str::limit((string) $request->userAgent(), 500, ''), 'created_at' => now(),
             ]);
 
-            return response()->json(['data' => $adjustment, 'message' => 'Decision recorded. The original record remains unchanged; no ledger or payment action was performed.']);
+            return response()->json([
+                'data' => $adjustment->fresh(),
+                'message' => $data['decision'] === 'approved' && $adjustment->adjustment_type === 'reversal'
+                    ? 'Reversal approved and posted to the double-entry ledger.'
+                    : ($data['decision'] === 'approved' && $adjustment->adjustment_type === 'correction'
+                        ? 'Correction decision recorded. No financial posting was performed.'
+                        : 'Decision recorded.'),
+            ]);
         });
 
         return $result;

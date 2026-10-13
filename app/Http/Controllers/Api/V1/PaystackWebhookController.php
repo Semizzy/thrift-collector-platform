@@ -57,13 +57,24 @@ class PaystackWebhookController extends Controller
             (string) ($data['status'] ?? ''), (string) ($data['customer']['customer_code'] ?? $data['customer_code'] ?? ''),
         ]));
         $payloadHash = hash('sha256', $raw);
+        $criticalFields = [
+            'event' => $eventType,
+            'object_id' => $objectId,
+            'reference' => $transactionRef,
+            'status' => (string) ($data['status'] ?? ''),
+            'amount' => (string) ($data['amount'] ?? ''),
+            'currency' => strtoupper((string) ($data['currency'] ?? '')),
+            'customer_code' => (string) ($data['customer']['customer_code'] ?? $data['customer_code'] ?? ''),
+        ];
+        $criticalPayloadHash = hash('sha256', json_encode($criticalFields, JSON_THROW_ON_ERROR));
         $safeMetadata = [
             'currency' => isset($data['currency']) ? (string) $data['currency'] : null,
             'status' => isset($data['status']) ? (string) $data['status'] : null,
             'reference_present' => $transactionRef !== '',
+            'critical_payload_hash' => $criticalPayloadHash,
         ];
 
-        return DB::transaction(function () use ($matchedBusinessId, $eventType, $data, $objectId, $transactionRef, $eventKey, $payloadHash, $safeMetadata): JsonResponse {
+        return DB::transaction(function () use ($matchedBusinessId, $eventType, $data, $objectId, $transactionRef, $eventKey, $payloadHash, $safeMetadata, $criticalPayloadHash): JsonResponse {
             $event = ProviderWebhookEvent::query()->firstOrCreate(
                 ['provider' => 'paystack', 'event_key' => $eventKey],
                 [
@@ -73,6 +84,36 @@ class PaystackWebhookController extends Controller
                 ]
             );
             if (! $event->wasRecentlyCreated) {
+                $previousCriticalHash = $event->safe_metadata['critical_payload_hash'] ?? null;
+                if (is_string($previousCriticalHash) && ! hash_equals($previousCriticalHash, $criticalPayloadHash)) {
+                    $event->forceFill([
+                        'status' => 'conflict',
+                        'safe_metadata' => array_merge($event->safe_metadata ?? [], ['conflicting_critical_payload_hash' => $criticalPayloadHash]),
+                        'processed_at' => now(),
+                    ])->save();
+                    PaymentOperationEvent::query()->create([
+                        'business_id' => $matchedBusinessId,
+                        'operation_type' => 'provider_webhook_event',
+                        'operation_id' => $event->id,
+                        'actor_user_id' => null,
+                        'event' => 'provider_webhook_conflicting_replay',
+                        'reason' => 'A repeated provider event key arrived with conflicting transaction-critical fields; automatic processing stopped for manual review.',
+                        'evidence' => [
+                            'provider' => 'paystack',
+                            'event_type' => $eventType,
+                            'provider_object_id' => $objectId,
+                            'existing_payload_hash' => $event->payload_hash,
+                            'received_payload_hash' => $payloadHash,
+                            'existing_critical_hash' => $previousCriticalHash,
+                            'received_critical_hash' => $criticalPayloadHash,
+                        ],
+                        'created_at' => now(),
+                    ]);
+                    return response()->json([
+                        'message' => 'Conflicting provider replay detected. The event was flagged for manual review; no additional financial posting was made.',
+                        'code' => 'provider_webhook_conflicting_replay',
+                    ], 409);
+                }
                 return response()->json(['received' => true, 'duplicate' => true]);
             }
 

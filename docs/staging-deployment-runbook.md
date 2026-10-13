@@ -4,9 +4,8 @@ This runbook is for a **separate, non-production cPanel staging site**. Passing 
 
 ## 1. Release identity and guardrails
 
-- Candidate branch: `ci/mysql8-wallet-concurrency-gate`
-- Candidate commit at runbook creation: `6c50562234a23dac6e83a8d07c5d3a98e76dd682` (recheck the PR head before using an artifact; documentation fixes create a newer commit).
-- Pull request: https://github.com/Semizzy/thrift-collector-platform/pull/1
+- Candidate branch and commit are release-specific: record the current reviewed PR head SHA and matching CI run before using any artifact. Do not copy a SHA from this example or an earlier run.
+- Keep the financial-control PR in draft until the code review, staging smoke tests, and required CI checks are complete.
 - Keep the PR in draft until the code review, staging smoke tests, and required CI checks are complete.
 - Do not merge or deploy to production as part of this runbook.
 - Do not enter real customer records, real payment credentials, or real payout destinations. Live provider execution must remain disabled.
@@ -22,7 +21,7 @@ This runbook is for a **separate, non-production cPanel staging site**. Passing 
 ## 3. Select and upload the exact candidate
 
 1. Open the PR and verify the latest head SHA and that all required CI jobs passed on that exact SHA.
-2. Download the `thrift-collector-deployment` artifact from the matching workflow run. It is a wrapper archive containing `thrift-collector-deployment.zip`; extract that inner ZIP.
+2. Download the `semizzy-thrift-deployment` artifact from the matching workflow run. GitHub downloads it as a wrapper archive containing `semizzy-thrift-deployment.zip`; extract that inner ZIP.
 3. Verify the ZIP's integrity before upload. Do not use an artifact from an earlier commit.
 4. Upload and extract the inner ZIP into the private staging application directory. Keep the previous staging artifact available for rollback.
 5. Verify `artisan`, `composer.lock`, `vendor/autoload.php`, migrations, `public/index.php`, and `public/app/index.html` exist.
@@ -60,6 +59,23 @@ After the basic staging smoke tests pass, add a staging-only cPanel Cron Job usi
 
 Verify the path and permissions first. Confirm scheduled work runs only against staging data. Do not enable any live-payment action. Keep backups outside the public root.
 
-## 7. Evidence required before considering production
+## 7. Backup, restore and rollback rehearsal
+
+### Required recovery drill (staging only)
+
+Do not mark recovery ready until a second operator can follow the evidence and repeat the restore:
+
+1. Record the exact staging release SHA, database name, database engine/version, application directory, and current migration status. Confirm the database name is the staging database before every command.
+2. Create a database dump using the host's supported `mysqldump`/MariaDB client. Use a private credentials file with restrictive permissions or the hosting provider's approved secret mechanism; do not place database passwords in shell history or command arguments.
+3. Include the private application files needed to recover configuration and uploads, but keep the `.env`, `APP_KEY`, credentials, and customer data encrypted and outside the web root. Do not include live payment credentials in a staging restore.
+4. Encrypt the dump and file archive using the organization's approved encryption method; store the encryption key separately from the backup. Verify the archive and checksum. Record the timestamp, size, checksum, encryption/key custody location, and operator.
+5. Restore into a **new isolated staging database and directory**, never over the current or production database. Confirm schema migration status, record counts, app boot, login, assets, and synthetic contribution/ledger invariants.
+6. Confirm that restored reconciliation triggers exist and still reject evidence/decision UPDATE and DELETE attempts. Confirm journal debits equal credits per transaction and the wallet balance matches the ledger history.
+7. Rehearse rollback by switching only the staging document root/release pointer to the previous known-good artifact and restoring the matching compatible database backup if schema changes require it. Verify health checks and login after rollback.
+8. Record pass/fail evidence, elapsed restore time, any missing files/rows, and corrective actions. A successful dump or archive creation alone is not a restore drill.
+
+Production backups, production restore tests, production keys, and production customer data are outside this staging procedure and require separately approved access and change control.
+
+## 8. Evidence required before considering production
 
 Record the candidate SHA, workflow URL, artifact ID, PHP/database versions, migration output, smoke-test results, log review, backup/restore rehearsal, and unresolved issues. Production remains blocked until financial/security/legal release gates in `cpanel-deployment.md` are separately reviewed and explicitly approved. A successful staging install is not permission to merge, deploy to production, import customer data, or enable money movement.

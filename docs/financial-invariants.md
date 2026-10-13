@@ -50,6 +50,17 @@ Transitions validate previous state, actor permissions, evidence requirements an
 - A webhook is not automatically proof of settlement; interpret it according to verified provider documentation and corroborating settlement data.
 - Unknown status, mismatched amount/currency, duplicate reference or missing settlement evidence creates an exception, not optimistic success.
 
+
+## Contribution adjustments and reconciliation evidence
+
+- A correction or reversal request is not a financial posting. Approval must atomically post a balanced, idempotent journal and record the decision in the same database transaction.
+- A reversal debits the member wallet and credits contribution clearing; if the member wallet lacks the full amount, do not approve or mark the contribution reversed.
+- A correction posts only the difference between the old and proposed amounts. Reductions require sufficient wallet funds. Do not rewrite the amount if the journal fails.
+- Imported reconciliation source fields and historical decisions are protected by database triggers. Review status and matching fields may change; original source evidence and decision history may not be edited or deleted.
+- If the hosting database cannot create and retain the required triggers, reconciliation is not immutable and release is blocked.
+- A repeated provider webhook with conflicting transaction-critical fields must be flagged for manual review and must not be processed as a harmless duplicate.
+- Live provider deposits/payouts remain disabled until provider status requery, settlement evidence, safe retry, reconciliation and independent approval gates are verified.
+
 ## Audit and approvals
 
 Audit events record actor, tenant, action, target, timestamp, correlation/idempotency reference and relevant before/after values, with secrets and sensitive identity data redacted. Financial history cannot be silently edited or deleted. High-risk actions require maker-checker approval, and the requester cannot approve their own payout.
