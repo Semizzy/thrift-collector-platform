@@ -221,7 +221,7 @@ final class ContributionCycleAndAdjustmentTest extends TestCase
     }
 
 
-    public function test_approved_contribution_correction_posts_only_the_amount_delta(): void
+    public function test_approved_contribution_correction_records_decision_without_posting_funds(): void
     {
         [$owner, $reviewer, $business, $group] = $this->groupWithTwoMembers();
         $record = ContributionRecord::query()->create([
@@ -249,10 +249,10 @@ final class ContributionCycleAndAdjustmentTest extends TestCase
                 'decision' => 'approved', 'decision_note' => 'Verified the receipt and approved the amount correction.',
             ])->assertOk()->assertJsonPath('data.status', 'approved');
 
-        $this->assertDatabaseHas('contribution_records', ['id' => $record->id, 'status' => 'confirmed', 'amount_minor' => 100000]);
-        $this->assertSame(100000, app(WalletLedgerService::class)->balance((int) $business->id, (int) $owner->id, 'NGN'));
-        $this->assertSame(2, DB::table('wallet_ledger_transactions')->where('business_id', $business->id)->count());
-        $this->assertSame(4, DB::table('wallet_ledger_entries')->count());
+        $this->assertDatabaseHas('contribution_records', ['id' => $record->id, 'status' => 'confirmed', 'amount_minor' => 87500]);
+        $this->assertSame(87500, app(WalletLedgerService::class)->balance((int) $business->id, (int) $owner->id, 'NGN'));
+        $this->assertSame(1, DB::table('wallet_ledger_transactions')->where('business_id', $business->id)->count());
+        $this->assertSame(2, DB::table('wallet_ledger_entries')->count());
         $this->assertDatabaseHas('business_audit_events', [
             'action' => 'contribution_adjustment.approved',
             'subject_id' => $adjustment->id,
