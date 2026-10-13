@@ -42,43 +42,109 @@ class WalletLedgerService
             ], $actorId);
     }
 
-    public function reverseContribution(int $businessId, int $userId, string $currency, int $amount, int $contributionId, ?int $actorId, string $reason): array
+    /**
+     * Reverse the exact journal that credited a confirmed contribution. The original
+     * journal is immutable; this posts a balanced, separately auditable inverse journal.
+     */
+    public function reverseContribution(int $businessId, int $contributionId, int $adjustmentId, int $actorId): array
     {
-        if (trim($reason) === '') {
-            throw new InvalidArgumentException('A contribution reversal requires an audited reason.');
-        }
+        return DB::transaction(function () use ($businessId, $contributionId, $adjustmentId, $actorId): array {
+            $contribution = DB::table('contribution_records as c')
+                ->join('thrift_groups as g', 'g.id', '=', 'c.thrift_group_id')
+                ->where('c.id', $contributionId)->where('g.business_id', $businessId)
+                ->lockForUpdate()->first([
+                    'c.id', 'c.user_id', 'c.amount_minor', 'c.currency_code', 'c.status', 'g.business_id',
+                ]);
+            if (! $contribution || $contribution->status !== 'confirmed') {
+                return ['status' => 'contribution_not_reversible', 'transaction_id' => null];
+            }
 
-        return $this->post($businessId, $currency, 'contribution_record', $contributionId,
-            'contribution:'.$contributionId.':wallet-reversal', 'Confirmed contribution reversal: '.trim($reason),
-            [
-                ['key' => $this->walletKey($userId, $currency), 'type' => 'member_wallet', 'user_id' => $userId, 'normal' => 'credit', 'direction' => 'debit', 'amount' => $amount],
-                ['key' => $this->systemKey('contribution-clearing', $currency), 'type' => 'contribution_clearing', 'user_id' => null, 'normal' => 'debit', 'direction' => 'credit', 'amount' => $amount],
-            ], $actorId, $this->walletKey($userId, $currency), ['reversal_reason' => trim($reason)]);
-    }
+            $original = DB::table('wallet_ledger_transactions')->where('business_id', $businessId)
+                ->where('idempotency_key', 'contribution:'.$contributionId.':wallet-credit')
+                ->lockForUpdate()->first();
+            if (! $original || $original->source_type !== 'contribution_record'
+                || (int) $original->source_id !== $contributionId
+                || $original->currency_code !== $contribution->currency_code) {
+                return ['status' => 'original_posting_not_found', 'transaction_id' => null];
+            }
 
-    public function correctContribution(int $businessId, int $userId, string $currency, int $oldAmount, int $newAmount, int $contributionId, int $adjustmentId, ?int $actorId, string $reason): array
-    {
-        if ($oldAmount < 1 || $newAmount < 1 || $oldAmount === $newAmount || trim($reason) === '') {
-            throw new InvalidArgumentException('A contribution correction requires a changed positive amount and an audited reason.');
-        }
+            $reversalKey = 'contribution:'.$contributionId.':wallet-reversal';
+            $priorReversal = DB::table('wallet_ledger_transactions')->where('business_id', $businessId)
+                ->where('idempotency_key', $reversalKey)->first();
+            if ($priorReversal) {
+                $priorMetadata = json_decode((string) $priorReversal->metadata, true) ?? [];
+                if ((int) ($priorMetadata['adjustment_id'] ?? 0) !== $adjustmentId) {
+                    return ['status' => 'already_reversed', 'transaction_id' => $priorReversal->id];
+                }
+                return ['status' => 'already_posted', 'transaction_id' => $priorReversal->id];
+            }
 
-        $delta = abs($newAmount - $oldAmount);
-        $increases = $newAmount > $oldAmount;
-        $lines = $increases
-            ? [
-                ['key' => $this->systemKey('contribution-clearing', $currency), 'type' => 'contribution_clearing', 'user_id' => null, 'normal' => 'debit', 'direction' => 'debit', 'amount' => $delta],
-                ['key' => $this->walletKey($userId, $currency), 'type' => 'member_wallet', 'user_id' => $userId, 'normal' => 'credit', 'direction' => 'credit', 'amount' => $delta],
-            ]
-            : [
-                ['key' => $this->walletKey($userId, $currency), 'type' => 'member_wallet', 'user_id' => $userId, 'normal' => 'credit', 'direction' => 'debit', 'amount' => $delta],
-                ['key' => $this->systemKey('contribution-clearing', $currency), 'type' => 'contribution_clearing', 'user_id' => null, 'normal' => 'debit', 'direction' => 'credit', 'amount' => $delta],
-            ];
+            $originalLines = DB::table('wallet_ledger_entries as e')
+                ->join('wallet_accounts as a', 'a.id', '=', 'e.wallet_account_id')
+                ->where('e.wallet_ledger_transaction_id', $original->id)
+                ->orderBy('a.account_key')
+                ->get(['a.account_key', 'a.account_type', 'a.user_id', 'a.normal_balance', 'a.currency_code', 'e.direction', 'e.amount_minor']);
+            // Contribution credits have a strict two-account shape. Do not reverse a merely
+            // balanced journal if its account ownership, directions, or amounts were corrupted.
+            if ($originalLines->count() !== 2) {
+                return ['status' => 'original_journal_invalid', 'transaction_id' => null];
+            }
 
-        return $this->post($businessId, $currency, 'contribution_record', $contributionId,
-            'contribution:'.$contributionId.':wallet-correction:'.$adjustmentId,
-            'Confirmed contribution amount correction: '.trim($reason), $lines, $actorId,
-            $increases ? null : $this->walletKey($userId, $currency),
-            ['adjustment_id' => $adjustmentId, 'old_amount_minor' => $oldAmount, 'new_amount_minor' => $newAmount, 'reason' => trim($reason)]);
+            $debits = (int) $originalLines->where('direction', 'debit')->sum('amount_minor');
+            $credits = (int) $originalLines->where('direction', 'credit')->sum('amount_minor');
+            $clearingLines = $originalLines->filter(fn ($line) =>
+                $line->account_type === 'contribution_clearing'
+                && $line->account_key === $this->systemKey('contribution-clearing', $contribution->currency_code)
+                && $line->direction === 'debit'
+                && $line->normal_balance === 'debit'
+                && (int) $line->amount_minor === (int) $contribution->amount_minor
+                && $line->user_id === null
+            );
+            $walletLines = $originalLines->filter(fn ($line) =>
+                $line->account_type === 'member_wallet'
+                && $line->account_key === $this->walletKey((int) $contribution->user_id, $contribution->currency_code)
+                && (int) $line->user_id === (int) $contribution->user_id
+                && $line->direction === 'credit'
+                && $line->normal_balance === 'credit'
+                && (int) $line->amount_minor === (int) $contribution->amount_minor
+            );
+            if ($debits !== $credits || $debits !== (int) $contribution->amount_minor
+                || $clearingLines->count() !== 1 || $walletLines->count() !== 1) {
+                return ['status' => 'original_journal_invalid', 'transaction_id' => null];
+            }
+
+            $lines = [];
+            $walletKey = null;
+            foreach ($originalLines as $line) {
+                if ($line->currency_code !== $contribution->currency_code) {
+                    return ['status' => 'currency_mismatch', 'transaction_id' => null];
+                }
+                if ($line->account_type === 'member_wallet') {
+                    if ((int) $line->user_id !== (int) $contribution->user_id || $line->direction !== 'credit') {
+                        return ['status' => 'original_journal_invalid', 'transaction_id' => null];
+                    }
+                    $walletKey = $line->account_key;
+                }
+                $lines[] = [
+                    'key' => $line->account_key, 'type' => $line->account_type,
+                    'user_id' => $line->user_id === null ? null : (int) $line->user_id,
+                    'normal' => $line->normal_balance,
+                    'direction' => $line->direction === 'debit' ? 'credit' : 'debit',
+                    'amount' => (int) $line->amount_minor,
+                ];
+            }
+            if ($walletKey === null) {
+                return ['status' => 'original_journal_invalid', 'transaction_id' => null];
+            }
+
+            return $this->post(
+                $businessId, $contribution->currency_code, 'contribution_record', $contributionId,
+                $reversalKey, 'Reversal of contribution wallet credit; original journal retained.',
+                $lines, $actorId, $walletKey,
+                ['adjustment_id' => $adjustmentId, 'original_transaction_id' => (int) $original->id,
+                    'contribution_record_id' => $contributionId, 'reversal' => true],
+            );
+        }, 3);
     }
 
     public function debitWithdrawal(int $businessId, int $userId, string $currency, int $amount, int $payoutId, ?int $actorId): array
